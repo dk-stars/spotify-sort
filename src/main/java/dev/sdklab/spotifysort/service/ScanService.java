@@ -1,22 +1,30 @@
 package dev.sdklab.spotifysort.service;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import dev.sdklab.spotifysort.engine.SyncSuggestEngine;
 import dev.sdklab.spotifysort.engine.TrackTagger;
-import dev.sdklab.spotifysort.model.*;
+import dev.sdklab.spotifysort.model.PlaylistSummary;
+import dev.sdklab.spotifysort.model.RawArtist;
+import dev.sdklab.spotifysort.model.RawTrack;
+import dev.sdklab.spotifysort.model.ScanJob;
+import dev.sdklab.spotifysort.model.ScanStatus;
+import dev.sdklab.spotifysort.model.SyncSuggestResult;
+import dev.sdklab.spotifysort.model.TaggedTrack;
 import dev.sdklab.spotifysort.repository.ScanJobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.stereotype.Service;
-import se.michaelthelin.spotify.model_objects.specification.Artist;
-import se.michaelthelin.spotify.model_objects.specification.ArtistSimplified;
 import se.michaelthelin.spotify.model_objects.specification.AudioFeatures;
-import se.michaelthelin.spotify.model_objects.specification.Track;
-
-import java.time.Instant;
-import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -57,32 +65,29 @@ public class ScanService {
             Long userId = job.getUserId();
 
             // 1. Fetch all tracks from source playlist
-            List<Track> tracks = spotifyClientService.getPlaylistTracks(userId, job.getSourcePlaylistId());
+            List<RawTrack> tracks = spotifyClientService.getPlaylistTracks(userId, job.getSourcePlaylistId());
 
             // 2. Collect unique artist IDs across all tracks
             Set<String> artistIds = tracks.stream()
-                    .filter(t -> t.getArtists() != null)
-                    .flatMap(t -> Arrays.stream(t.getArtists()).map(ArtistSimplified::getId))
+                    .flatMap(t -> t.artistIds().stream())
                     .collect(Collectors.toSet());
 
             // 3. Batch-fetch full Artist objects (needed for genres)
-            Map<String, Artist> artistMap = spotifyClientService.getArtistsByIds(userId, artistIds);
+            Map<String, RawArtist> artistMap = spotifyClientService.getArtistsByIds(userId, artistIds);
 
             // 4. Batch-fetch audio features
-            List<String> trackIds = tracks.stream().map(Track::getId).collect(Collectors.toList());
+            List<String> trackIds = tracks.stream().map(RawTrack::id).collect(Collectors.toList());
             Map<String, AudioFeatures> featuresMap = spotifyClientService.getAudioFeatures(userId, trackIds);
 
             // 5. Tag every track
             List<TaggedTrack> taggedTracks = new ArrayList<>();
-            for (Track track : tracks) {
-                List<Artist> artists = track.getArtists() == null
-                        ? Collections.emptyList()
-                        : Arrays.stream(track.getArtists())
-                                .map(a -> artistMap.get(a.getId()))
-                                .filter(Objects::nonNull)
-                                .collect(Collectors.toList());
+            for (RawTrack track : tracks) {
+                List<RawArtist> artists = track.artistIds().stream()
+                        .map(artistMap::get)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
 
-                AudioFeatures features = featuresMap.get(track.getId());
+                AudioFeatures features = featuresMap.get(track.id());
                 taggedTracks.add(trackTagger.tag(track, artists, features));
             }
 
@@ -97,7 +102,7 @@ public class ScanService {
             job.setStatus(ScanStatus.DONE);
 
         } catch (Exception e) {
-            log.error("Scan job {} failed", jobId, e);
+            log.error("Scan job {} failed: {}", jobId, e.getMessage(), e);
             job.setStatus(ScanStatus.FAILED);
             job.setErrorMessage(e.getMessage());
         } finally {

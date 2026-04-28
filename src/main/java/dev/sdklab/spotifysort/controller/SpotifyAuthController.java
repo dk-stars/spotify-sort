@@ -1,24 +1,33 @@
 package dev.sdklab.spotifysort.controller;
 
-import dev.sdklab.spotifysort.model.User;
-import dev.sdklab.spotifysort.repository.UserRepository;
-import jakarta.servlet.http.HttpSession;
-import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import se.michaelthelin.spotify.SpotifyApi;
-import se.michaelthelin.spotify.model_objects.credentials.AuthorizationCodeCredentials;
-import se.michaelthelin.spotify.requests.authorization.authorization_code.AuthorizationCodeUriRequest;
-
 import java.net.URI;
 import java.time.Instant;
 import java.util.Map;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.SessionAttribute;
+
+import dev.sdklab.spotifysort.model.User;
+import dev.sdklab.spotifysort.repository.UserRepository;
+import jakarta.servlet.http.HttpSession;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import se.michaelthelin.spotify.SpotifyApi;
+import se.michaelthelin.spotify.SpotifyHttpManager;
+import se.michaelthelin.spotify.model_objects.credentials.AuthorizationCodeCredentials;
+import se.michaelthelin.spotify.requests.authorization.authorization_code.AuthorizationCodeUriRequest;
+
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
+@Slf4j
 public class SpotifyAuthController {
 
     private final SpotifyApi spotifyApi;
@@ -27,10 +36,13 @@ public class SpotifyAuthController {
     @Value("${spotify.frontend-url}")
     private String frontendUrl;
 
+    @Value("${spotify.redirect-uri}")
+    private String redirectUri;
+
     @GetMapping("/login")
     public ResponseEntity<Void> login() {
         AuthorizationCodeUriRequest request = spotifyApi.authorizationCodeUri()
-                .scope("playlist-read-private,playlist-modify-private,playlist-modify-public,user-read-private")
+                .scope("playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public,user-read-private")
                 .build();
 
         URI uri = request.execute();
@@ -40,8 +52,15 @@ public class SpotifyAuthController {
     @GetMapping("/callback")
     public ResponseEntity<Void> callback(@RequestParam("code") String code, HttpSession session) {
         try {
+            // Create a fresh SpotifyApi instance for code exchange (singleton may have stale state)
+            SpotifyApi authApi = new SpotifyApi.Builder()
+                    .setClientId(spotifyApi.getClientId())
+                    .setClientSecret(spotifyApi.getClientSecret())
+                    .setRedirectUri(SpotifyHttpManager.makeUri(redirectUri))
+                    .build();
+
             AuthorizationCodeCredentials credentials =
-                    spotifyApi.authorizationCode(code).build().execute();
+                    authApi.authorizationCode(code).build().execute();
 
             // Fetch Spotify profile using a temporary per-request SpotifyApi instance
             SpotifyApi tempApi = new SpotifyApi.Builder()

@@ -18,7 +18,7 @@ spotify:
   client-id: ${SPOTIFY_CLIENT_ID:your-client-id}
   client-secret: ${SPOTIFY_CLIENT_SECRET:your-client-secret}
   redirect-uri: ${SPOTIFY_REDIRECT_URI:http://127.0.0.1:8080/api/auth/callback}
-  frontend-url: ${FRONTEND_URL:http://localhost:3000}
+  frontend-url: ${FRONTEND_URL:http://127.0.0.1:3000}
 
 server:
   port: 8080

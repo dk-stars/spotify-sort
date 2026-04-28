@@ -1,18 +1,20 @@
 package dev.sdklab.spotifysort.service;
 
+import java.time.Instant;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
 import dev.sdklab.spotifysort.model.User;
 import dev.sdklab.spotifysort.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
+import lombok.extern.slf4j.Slf4j;
 import se.michaelthelin.spotify.SpotifyApi;
-import se.michaelthelin.spotify.SpotifyHttpManager;
 import se.michaelthelin.spotify.model_objects.credentials.AuthorizationCodeCredentials;
-
-import java.time.Instant;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TokenService {
 
     @Value("${spotify.client-id}")
@@ -37,15 +39,14 @@ public class TokenService {
         if (Instant.now().isAfter(user.getTokenExpiresAt().minusSeconds(60))) {
             refreshToken(user);
         }
-
         return buildApi(user.getAccessToken(), user.getRefreshToken());
     }
 
     private SpotifyApi buildApi(String accessToken, String refreshToken) {
+        // Only set the access/refresh tokens — do NOT include clientId/clientSecret here.
+        // When client credentials are present alongside a bearer token, the library may
+        // choose the wrong authentication method for data requests.
         return new SpotifyApi.Builder()
-                .setClientId(clientId)
-                .setClientSecret(clientSecret)
-                .setRedirectUri(SpotifyHttpManager.makeUri(redirectUri))
                 .setAccessToken(accessToken)
                 .setRefreshToken(refreshToken)
                 .build();
