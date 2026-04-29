@@ -1,16 +1,28 @@
 package dev.sdklab.spotifysort.controller;
 
+import java.util.Map;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.SessionAttribute;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.sdklab.spotifysort.model.*;
+
+import dev.sdklab.spotifysort.model.ScanJob;
+import dev.sdklab.spotifysort.model.ScanRequest;
+import dev.sdklab.spotifysort.model.ScanStatus;
+import dev.sdklab.spotifysort.model.ScanStatusResponse;
+import dev.sdklab.spotifysort.model.SyncSuggestResult;
 import dev.sdklab.spotifysort.repository.ScanJobRepository;
 import dev.sdklab.spotifysort.service.ScanService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/scan")
@@ -35,6 +47,22 @@ public class ScanController {
         return ResponseEntity.accepted().body(Map.of("jobId", jobId));
     }
 
+    @PostMapping("/{jobId}/cancel")
+    public ResponseEntity<?> cancelScan(
+            @SessionAttribute(name = "userId", required = false) Long userId,
+            @PathVariable Long jobId) {
+
+        if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+
+        ScanJob job = scanJobRepository.findById(jobId).orElse(null);
+        if (job == null || !job.getUserId().equals(userId)) {
+            return ResponseEntity.notFound().build();
+        }
+
+        scanService.requestCancel(jobId);
+        return ResponseEntity.accepted().body(Map.of("jobId", jobId, "status", "CANCELLING"));
+    }
+
     @GetMapping("/{jobId}")
     public ResponseEntity<?> getStatus(
             @SessionAttribute(name = "userId", required = false) Long userId,
@@ -56,6 +84,13 @@ public class ScanController {
             }
         }
 
-        return ResponseEntity.ok(new ScanStatusResponse(jobId, job.getStatus(), result, job.getErrorMessage()));
+        return ResponseEntity.ok(new ScanStatusResponse(
+            jobId,
+            job.getStatus(),
+            result,
+            job.getErrorMessage(),
+            job.getCurrentStep(),
+            job.getProgressPercent()
+        ));
     }
 }

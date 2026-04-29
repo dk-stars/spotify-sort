@@ -8,14 +8,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 
+import dev.sdklab.spotifysort.model.TrackTag;
 import dev.sdklab.spotifysort.repository.ArtistTagRepository;
 import dev.sdklab.spotifysort.repository.TrackTagRepository;
 import dev.sdklab.spotifysort.tagging.api.TagResult;
 import dev.sdklab.spotifysort.tagging.api.TagSource;
 import dev.sdklab.spotifysort.tagging.api.TagType;
+import dev.sdklab.spotifysort.tagging.norm.TagNormalizer;
 
 @DataJpaTest
-@Import(TagCacheService.class)
+@Import({TagCacheService.class, TagNormalizer.class})
 class TagCacheServiceTest {
 
     @Autowired
@@ -77,5 +79,31 @@ class TagCacheServiceTest {
         assertThat(tagCacheService.isArtistTagsCacheValid(ARTIST_ID, TagSource.LAST_FM)).isTrue();
         List<TagResult> retrieved = tagCacheService.getArtistTags(ARTIST_ID);
         assertThat(retrieved).extracting(TagResult::value).containsExactly("electronic");
+    }
+
+    @Test
+    void getTrackTags_normalizesLegacyCachedVariants() {
+        trackTagRepository.save(TrackTag.builder()
+                .trackSpotifyId(TRACK_ID)
+                .value("hip-hop")
+                .type(TagType.GENRE)
+                .source(TagSource.LAST_FM)
+                .weight(70)
+                .cachedAt(java.time.Instant.now())
+                .build());
+        trackTagRepository.save(TrackTag.builder()
+                .trackSpotifyId(TRACK_ID)
+                .value("hip hop")
+                .type(TagType.GENRE)
+                .source(TagSource.LAST_FM)
+                .weight(80)
+                .cachedAt(java.time.Instant.now())
+                .build());
+
+        List<TagResult> retrieved = tagCacheService.getTrackTags(TRACK_ID);
+
+        assertThat(retrieved).hasSize(1);
+        assertThat(retrieved.get(0).value()).isEqualTo("hip hop");
+        assertThat(retrieved.get(0).weight()).isEqualTo(80);
     }
 }

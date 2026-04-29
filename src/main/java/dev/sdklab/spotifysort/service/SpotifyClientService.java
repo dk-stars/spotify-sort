@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -104,6 +105,17 @@ public class SpotifyClientService {
                 "https://api.spotify.com/v1/playlists/" + playlistId + "/items?limit=100&additional_types=track",
                 playlistId
         );
+    }
+
+    public Set<String> getPlaylistTrackUris(Long userId, String playlistId) throws Exception {
+        if (LIKED_SONGS_SOURCE_ID.equals(playlistId)) {
+            return Set.of();
+        }
+
+        List<RawTrack> tracks = getPlaylistTracks(userId, playlistId);
+        return tracks.stream()
+                .map(RawTrack::uri)
+                .collect(Collectors.toSet());
     }
 
     private List<RawTrack> fetchTracks(String accessToken, String initialUrl, String sourceLabel) {

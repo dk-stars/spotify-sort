@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import se.michaelthelin.spotify.SpotifyApi;
 import se.michaelthelin.spotify.SpotifyHttpManager;
+import se.michaelthelin.spotify.enums.AuthorizationScope;
 import se.michaelthelin.spotify.model_objects.credentials.AuthorizationCodeCredentials;
 import se.michaelthelin.spotify.requests.authorization.authorization_code.AuthorizationCodeUriRequest;
 
@@ -42,7 +43,15 @@ public class SpotifyAuthController {
     @GetMapping("/login")
     public ResponseEntity<Void> login() {
         AuthorizationCodeUriRequest request = spotifyApi.authorizationCodeUri()
-                                .scope("playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public,user-read-private,user-library-read")
+                .scope(
+                        AuthorizationScope.PLAYLIST_READ_PRIVATE,
+                        AuthorizationScope.PLAYLIST_READ_COLLABORATIVE,
+                        AuthorizationScope.PLAYLIST_MODIFY_PRIVATE,
+                        AuthorizationScope.PLAYLIST_MODIFY_PUBLIC,
+                        AuthorizationScope.USER_READ_PRIVATE,
+                        AuthorizationScope.USER_LIBRARY_READ
+                )
+                .show_dialog(true)
                 .build();
 
         URI uri = request.execute();

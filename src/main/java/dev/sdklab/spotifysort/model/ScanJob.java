@@ -47,6 +47,15 @@ public class ScanJob {
     @Column(length = 2048)
     private String errorMessage;
 
+    @Column(length = 255)
+    private String currentStep;
+
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int progressPercent;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean cancelRequested;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 

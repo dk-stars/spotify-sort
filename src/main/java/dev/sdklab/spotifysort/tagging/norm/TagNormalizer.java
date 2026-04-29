@@ -2,6 +2,7 @@ package dev.sdklab.spotifysort.tagging.norm;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -14,6 +15,10 @@ import dev.sdklab.spotifysort.tagging.api.TagType;
 
 @Component
 public class TagNormalizer {
+
+    private static final Map<String, String> CANONICAL_ALIASES = Map.of(
+            "hiphop", "hip hop"
+    );
 
     private static final Set<String> MOOD_KEYWORDS = Set.of(
             "chill", "calm", "dark", "happy", "sad", "energetic",
@@ -62,6 +67,6 @@ public class TagNormalizer {
         normalized = normalized.replaceAll("[‐-―]", "-");
         normalized = normalized.replaceAll("(?<=\\p{Alnum})[-_](?=\\p{Alnum})", " ");
         normalized = normalized.replaceAll("\\s+", " ").trim();
-        return normalized;
+        return CANONICAL_ALIASES.getOrDefault(normalized, normalized);
     }
 }

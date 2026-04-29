@@ -68,10 +68,13 @@ class TagNormalizerTest {
     void dashedAndSpacedVariants_areCanonicalizedToSameTag() {
         Optional<TagResult> hyphenated = normalizer.normalize("hip-hop", TagSource.LAST_FM, 42);
         Optional<TagResult> spaced = normalizer.normalize("hip hop", TagSource.LAST_FM, 42);
+        Optional<TagResult> compact = normalizer.normalize("hiphop", TagSource.LAST_FM, 42);
 
         assertThat(hyphenated).isPresent();
         assertThat(spaced).isPresent();
+        assertThat(compact).isPresent();
         assertThat(hyphenated.get().value()).isEqualTo("hip hop");
         assertThat(spaced.get().value()).isEqualTo("hip hop");
+        assertThat(compact.get().value()).isEqualTo("hip hop");
     }
 }
