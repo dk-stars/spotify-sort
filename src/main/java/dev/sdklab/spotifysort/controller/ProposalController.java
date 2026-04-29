@@ -7,8 +7,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.SessionAttribute;
 
 import dev.sdklab.spotifysort.model.ExecuteRequest;
 import dev.sdklab.spotifysort.model.ExecuteSummary;
@@ -24,7 +24,7 @@ public class ProposalController {
 
     @PostMapping("/execute")
     public ResponseEntity<?> execute(
-            @SessionAttribute(name = "userId", required = false) Long userId,
+            @RequestAttribute(name = "userId", required = false) Long userId,
             @RequestBody ExecuteRequest request) {
 
         if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();

@@ -12,12 +12,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.SessionAttribute;
+import org.springframework.web.bind.annotation.RequestAttribute;
 
 import dev.sdklab.spotifysort.model.User;
 import dev.sdklab.spotifysort.repository.UserRepository;
+import dev.sdklab.spotifysort.service.JwtUtil;
 import dev.sdklab.spotifysort.service.TokenService;
-import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import se.michaelthelin.spotify.SpotifyApi;
@@ -34,7 +34,8 @@ public class SpotifyAuthController {
 
     private final SpotifyApi spotifyApi;
     private final UserRepository userRepository;
-        private final TokenService tokenService;
+    private final TokenService tokenService;
+    private final JwtUtil jwtUtil;
 
     @Value("${spotify.frontend-url}")
     private String frontendUrl;
@@ -61,7 +62,7 @@ public class SpotifyAuthController {
     }
 
     @GetMapping("/callback")
-    public ResponseEntity<Void> callback(@RequestParam("code") String code, HttpSession session) {
+    public ResponseEntity<Void> callback(@RequestParam("code") String code) {
         try {
             // Create a fresh SpotifyApi instance for code exchange (singleton may have stale state)
             SpotifyApi authApi = new SpotifyApi.Builder()
@@ -99,10 +100,10 @@ public class SpotifyAuthController {
                         }
 
             User savedUser = userRepository.save(user);
-            session.setAttribute("userId", savedUser.getId());
+            String token = jwtUtil.issue(savedUser.getId());
 
             return ResponseEntity.status(HttpStatus.FOUND)
-                    .location(URI.create(frontendUrl + "/"))
+                    .location(URI.create(frontendUrl + "/?token=" + token))
                     .build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.FOUND)
@@ -113,7 +114,7 @@ public class SpotifyAuthController {
 
     @GetMapping("/me")
     public ResponseEntity<?> me(
-            @SessionAttribute(name = "userId", required = false) Long userId) {
+            @RequestAttribute(name = "userId", required = false) Long userId) {
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
@@ -131,8 +132,8 @@ public class SpotifyAuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(HttpSession session) {
-        session.invalidate();
+    public ResponseEntity<Void> logout() {
+        // Stateless: the client simply discards its bearer token.
         return ResponseEntity.noContent().build();
     }
 

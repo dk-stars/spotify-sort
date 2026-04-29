@@ -9,8 +9,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.SessionAttribute;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -36,7 +36,7 @@ public class ScanController {
 
     @PostMapping
     public ResponseEntity<?> startScan(
-            @SessionAttribute(name = "userId", required = false) Long userId,
+            @RequestAttribute(name = "userId", required = false) Long userId,
             @RequestBody ScanRequest request) {
 
         if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
@@ -49,7 +49,7 @@ public class ScanController {
 
     @PostMapping("/{jobId}/cancel")
     public ResponseEntity<?> cancelScan(
-            @SessionAttribute(name = "userId", required = false) Long userId,
+            @RequestAttribute(name = "userId", required = false) Long userId,
             @PathVariable Long jobId) {
 
         if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
@@ -65,7 +65,7 @@ public class ScanController {
 
     @GetMapping("/{jobId}")
     public ResponseEntity<?> getStatus(
-            @SessionAttribute(name = "userId", required = false) Long userId,
+            @RequestAttribute(name = "userId", required = false) Long userId,
             @PathVariable Long jobId) {
 
         if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
