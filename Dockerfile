@@ -14,5 +14,6 @@ RUN useradd --system --create-home --uid 10001 app
 COPY --from=build /workspace/target/spotify-sort-0.0.1-SNAPSHOT.jar /app/app.jar
 ENV SERVER_PORT=8080
 EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD curl -f http://localhost:8080/actuator/health || exit 1
 USER app
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
