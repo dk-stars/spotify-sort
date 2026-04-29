@@ -1,0 +1,11 @@
+.git
+.idea
+.vscode
+target
+*.iml
+README.md
+HELP.md
+refs
+spotify-sort-fe
+spotify-sort-fe-backup.git
+spotify-sort-backup.git
