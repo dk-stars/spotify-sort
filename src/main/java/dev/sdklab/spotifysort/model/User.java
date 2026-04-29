@@ -31,6 +31,8 @@ public class User {
 
     private String displayName;
 
+    private String avatarUrl;
+
     @Column(nullable = false, length = 1024)
     private String accessToken;
 

@@ -24,8 +24,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import se.michaelthelin.spotify.SpotifyApi;
 import se.michaelthelin.spotify.model_objects.specification.AudioFeatures;
-import se.michaelthelin.spotify.model_objects.specification.Paging;
-import se.michaelthelin.spotify.model_objects.specification.PlaylistSimplified;
 
 /**
  * Thin wrapper around the Spotify Web API that handles pagination and batching.
@@ -48,46 +46,74 @@ public class SpotifyClientService {
     // -------------------------------------------------------------------------
 
     public List<PlaylistSummary> getUserPlaylists(Long userId) throws Exception {
+        tokenService.getApiForUser(userId);
         User user = userRepository.findById(userId).orElseThrow();
         String spotifyUserId = user.getSpotifyId();
-        SpotifyApi api = tokenService.getApiForUser(userId);
         List<PlaylistSummary> result = new ArrayList<>();
-        int offset = 0;
-        final int limit = 50;
+        String nextUrl = "https://api.spotify.com/v1/me/playlists?limit=50";
 
         fetchLikedSongsSummary(user)
                 .ifPresent(result::add);
 
-        while (true) {
-            Paging<PlaylistSimplified> page = api.getListOfCurrentUsersPlaylists()
-                    .limit(limit)
-                    .offset(offset)
-                    .build()
-                    .execute();
+        while (nextUrl != null) {
+            JsonNode body = restTemplate.exchange(
+                    nextUrl,
+                    HttpMethod.GET,
+                    new HttpEntity<>(authorizedHeaders(user.getAccessToken())),
+                    JsonNode.class
+            ).getBody();
 
-            for (PlaylistSimplified p : page.getItems()) {
+            if (body == null) {
+                break;
+            }
+
+            JsonNode items = body.path("items");
+            if (items.isArray()) {
+                for (JsonNode playlist : items) {
+                    String playlistId = playlist.path("id").asText(null);
+                    if (playlistId == null || playlistId.isBlank()) {
+                        continue;
+                    }
+
+                    String ownerId = playlist.path("owner").path("id").asText(null);
+                    String playlistName = playlist.path("name").asText(playlistId);
+
                 // Only include playlists owned by the authenticated user.
                 // Followed playlists owned by others may be private → 403 on track fetch.
-                if (p.getOwner() == null || !spotifyUserId.equals(p.getOwner().getId())) {
+                    if (ownerId == null || !spotifyUserId.equals(ownerId)) {
                     log.info("Skipping playlist '{}' (id={}) owned by {} — not owned by current user {}",
-                            p.getName(), p.getId(),
-                            p.getOwner() != null ? p.getOwner().getId() : "null",
+                            playlistName, playlistId,
+                            ownerId,
                             spotifyUserId);
                     continue;
                 }
-                log.info("Including playlist '{}' (id={}) owned by current user", p.getName(), p.getId());
-                // Spotify's simplified playlist response no longer reliably includes
-                // tracks.total — treat 0/null as unknown rather than actually empty.
-                int total = (p.getTracks() != null && p.getTracks().getTotal() != null)
-                        ? p.getTracks().getTotal() : -1;
-                result.add(new PlaylistSummary(p.getId(), p.getName(), total));
+
+                    int total = extractPlaylistTrackCount(playlist);
+                    log.info("Including playlist '{}' (id={}) owned by current user with {} tracks",
+                            playlistName, playlistId, total);
+                    result.add(new PlaylistSummary(playlistId, playlistName, total));
+                }
             }
 
-            if (page.getNext() == null) break;
-            offset += limit;
+            JsonNode next = body.get("next");
+            nextUrl = (next != null && !next.isNull()) ? next.asText() : null;
         }
 
         return result;
+    }
+
+    private int extractPlaylistTrackCount(JsonNode playlist) {
+        JsonNode itemsTotal = playlist.path("items").path("total");
+        if (itemsTotal.canConvertToInt()) {
+            return itemsTotal.asInt();
+        }
+
+        JsonNode tracksTotal = playlist.path("tracks").path("total");
+        if (tracksTotal.canConvertToInt()) {
+            return tracksTotal.asInt();
+        }
+
+        return -1;
     }
 
     public List<RawTrack> getPlaylistTracks(Long userId, String playlistId) throws Exception {

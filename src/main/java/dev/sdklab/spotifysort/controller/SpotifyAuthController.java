@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.SessionAttribute;
 
 import dev.sdklab.spotifysort.model.User;
 import dev.sdklab.spotifysort.repository.UserRepository;
+import dev.sdklab.spotifysort.service.TokenService;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +34,7 @@ public class SpotifyAuthController {
 
     private final SpotifyApi spotifyApi;
     private final UserRepository userRepository;
+        private final TokenService tokenService;
 
     @Value("${spotify.frontend-url}")
     private String frontendUrl;
@@ -92,6 +94,9 @@ public class SpotifyAuthController {
             if (spotifyUser.getDisplayName() != null) {
                 user.setDisplayName(spotifyUser.getDisplayName());
             }
+                        if (spotifyUser.getImages() != null && spotifyUser.getImages().length > 0) {
+                                user.setAvatarUrl(spotifyUser.getImages()[0].getUrl());
+                        }
 
             User savedUser = userRepository.save(user);
             session.setAttribute("userId", savedUser.getId());
@@ -113,11 +118,15 @@ public class SpotifyAuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         return userRepository.findById(userId)
-                .map(u -> ResponseEntity.ok(Map.of(
-                        "userId", u.getId(),
-                        "spotifyId", u.getSpotifyId(),
-                        "displayName", u.getDisplayName() != null ? u.getDisplayName() : ""
-                )))
+                .map(u -> {
+                                        User resolvedUser = syncUserProfile(u);
+                    return ResponseEntity.ok(Map.of(
+                                                "userId", resolvedUser.getId(),
+                                                "spotifyId", resolvedUser.getSpotifyId(),
+                                                "displayName", resolvedUser.getDisplayName() != null ? resolvedUser.getDisplayName() : "",
+                                                "avatarUrl", resolvedUser.getAvatarUrl() != null ? resolvedUser.getAvatarUrl() : ""
+                    ));
+                })
                 .orElse(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
     }
 
@@ -126,4 +135,20 @@ public class SpotifyAuthController {
         session.invalidate();
         return ResponseEntity.noContent().build();
     }
+
+        private User syncUserProfile(User user) {
+                try {
+                        var profile = tokenService.getApiForUser(user.getId()).getCurrentUsersProfile().build().execute();
+                        if (profile.getDisplayName() != null && !profile.getDisplayName().isBlank()) {
+                                user.setDisplayName(profile.getDisplayName());
+                        }
+                        if (profile.getImages() != null && profile.getImages().length > 0) {
+                                user.setAvatarUrl(profile.getImages()[0].getUrl());
+                        }
+                        return userRepository.save(user);
+                } catch (Exception e) {
+                        log.warn("Failed to refresh Spotify profile metadata for user {}", user.getSpotifyId(), e);
+                        return user;
+        }
+        }
 }
