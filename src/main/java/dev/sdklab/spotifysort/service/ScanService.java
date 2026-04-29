@@ -47,9 +47,13 @@ public class ScanService {
      * The caller is responsible for triggering {@link #runScan(Long)} afterwards.
      */
     public Long createScan(Long userId, String sourcePlaylistId, int threshold) {
+        String effectiveSourcePlaylistId = (sourcePlaylistId == null || sourcePlaylistId.isBlank())
+            ? SpotifyClientService.LIKED_SONGS_SOURCE_ID
+            : sourcePlaylistId;
+
         ScanJob job = ScanJob.builder()
                 .userId(userId)
-                .sourcePlaylistId(sourcePlaylistId)
+            .sourcePlaylistId(effectiveSourcePlaylistId)
                 .threshold(threshold)
                 .status(ScanStatus.PENDING)
                 .build();

@@ -35,6 +35,9 @@ import se.michaelthelin.spotify.model_objects.specification.PlaylistSimplified;
 @Slf4j
 public class SpotifyClientService {
 
+    public static final String LIKED_SONGS_SOURCE_ID = "__liked_songs__";
+    private static final String LIKED_SONGS_NAME = "Liked Songs";
+
     private final TokenService tokenService;
     private final UserRepository userRepository;
     private final RestTemplate restTemplate;
@@ -50,6 +53,9 @@ public class SpotifyClientService {
         List<PlaylistSummary> result = new ArrayList<>();
         int offset = 0;
         final int limit = 50;
+
+        fetchLikedSongsSummary(user)
+                .ifPresent(result::add);
 
         while (true) {
             Paging<PlaylistSimplified> page = api.getListOfCurrentUsersPlaylists()
@@ -84,58 +90,45 @@ public class SpotifyClientService {
     }
 
     public List<RawTrack> getPlaylistTracks(Long userId, String playlistId) throws Exception {
-        log.info("Fetching tracks for user {} from playlist {} via /items endpoint", userId, playlistId);
-        // Reload user after potential token refresh triggered by getApiForUser
         tokenService.getApiForUser(userId);
         User user = userRepository.findById(userId).orElseThrow();
 
+        if (LIKED_SONGS_SOURCE_ID.equals(playlistId)) {
+            log.info("Fetching saved tracks for user {} from Liked Songs", userId);
+            return fetchTracks(user.getAccessToken(), "https://api.spotify.com/v1/me/tracks?limit=50", LIKED_SONGS_NAME);
+        }
+
+        log.info("Fetching tracks for user {} from playlist {} via /items endpoint", userId, playlistId);
+        return fetchTracks(
+                user.getAccessToken(),
+                "https://api.spotify.com/v1/playlists/" + playlistId + "/items?limit=100&additional_types=track",
+                playlistId
+        );
+    }
+
+    private List<RawTrack> fetchTracks(String accessToken, String initialUrl, String sourceLabel) {
         List<RawTrack> result = new ArrayList<>();
-        String nextUrl = "https://api.spotify.com/v1/playlists/" + playlistId
-                + "/items?limit=100&additional_types=track";
+        String nextUrl = initialUrl;
 
         while (nextUrl != null) {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(user.getAccessToken());
-
             JsonNode body = restTemplate.exchange(
-                    nextUrl, HttpMethod.GET, new HttpEntity<>(headers), JsonNode.class
+                    nextUrl,
+                    HttpMethod.GET,
+                    new HttpEntity<>(authorizedHeaders(accessToken)),
+                    JsonNode.class
             ).getBody();
 
-            log.info("Received response for playlist items request: {}", body);
-            log.info("Received response for playlist items request: {}", body);
-            if (body == null) break;
+            if (body == null) {
+                break;
+            }
 
             JsonNode items = body.get("items");
             if (items != null && items.isArray()) {
                 for (JsonNode item : items) {
-                    // Items can have track data nested under "item" field (playlist context)
-                    // or under "track" field (search context) or be direct track objects.
-                    JsonNode track = item;
-                    if (item.has("item") && !item.get("item").isNull()) {
-                        track = item.get("item");
-                    } else if (item.has("track") && !item.get("track").isNull()) {
-                        track = item.get("track");
+                    RawTrack rawTrack = toRawTrack(item);
+                    if (rawTrack != null) {
+                        result.add(rawTrack);
                     }
-
-                    String id = track.path("id").asText(null);
-                    if (id == null || id.isBlank()) continue;
-
-                    String name = track.path("name").asText("");
-                    String uri = track.path("uri").asText("spotify:track:" + id);
-
-                    List<String> artistIds = new ArrayList<>();
-                    List<String> artistNames = new ArrayList<>();
-                    JsonNode artists = track.get("artists");
-                    if (artists != null && artists.isArray()) {
-                        for (JsonNode artist : artists) {
-                            String artistId = artist.path("id").asText(null);
-                            if (artistId != null && !artistId.isBlank()) artistIds.add(artistId);
-                            String artistName = artist.path("name").asText(null);
-                            if (artistName != null && !artistName.isBlank()) artistNames.add(artistName);
-                        }
-                    }
-
-                    result.add(new RawTrack(id, name, uri, artistIds, artistNames));
                 }
             }
 
@@ -143,8 +136,81 @@ public class SpotifyClientService {
             nextUrl = (next != null && !next.isNull()) ? next.asText() : null;
         }
 
-        log.info("Fetched {} tracks from playlist {}", result.size(), playlistId);
+        log.info("Fetched {} tracks from {}", result.size(), sourceLabel);
         return result;
+    }
+
+    private RawTrack toRawTrack(JsonNode item) {
+        JsonNode track = item;
+        if (item.has("item") && !item.get("item").isNull()) {
+            track = item.get("item");
+        } else if (item.has("track") && !item.get("track").isNull()) {
+            track = item.get("track");
+        }
+
+        String id = track.path("id").asText(null);
+        if (id == null || id.isBlank()) {
+            return null;
+        }
+
+        String name = track.path("name").asText("");
+        String uri = track.path("uri").asText("spotify:track:" + id);
+
+        List<String> artistIds = new ArrayList<>();
+        List<String> artistNames = new ArrayList<>();
+        JsonNode artists = track.get("artists");
+        if (artists != null && artists.isArray()) {
+            for (JsonNode artist : artists) {
+                String artistId = artist.path("id").asText(null);
+                if (artistId != null && !artistId.isBlank()) {
+                    artistIds.add(artistId);
+                }
+                String artistName = artist.path("name").asText(null);
+                if (artistName != null && !artistName.isBlank()) {
+                    artistNames.add(artistName);
+                }
+            }
+        }
+
+        return new RawTrack(id, name, uri, artistIds, artistNames, extractAlbumImageUrl(track));
+    }
+
+    private String extractAlbumImageUrl(JsonNode track) {
+        JsonNode images = track.path("album").path("images");
+        if (!images.isArray() || images.isEmpty()) {
+            return null;
+        }
+        return images.get(0).path("url").asText(null);
+    }
+
+    private HttpHeaders authorizedHeaders(String accessToken) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(accessToken);
+        return headers;
+    }
+
+    private java.util.Optional<PlaylistSummary> fetchLikedSongsSummary(User user) {
+        try {
+            JsonNode body = restTemplate.exchange(
+                    "https://api.spotify.com/v1/me/tracks?limit=1",
+                    HttpMethod.GET,
+                    new HttpEntity<>(authorizedHeaders(user.getAccessToken())),
+                    JsonNode.class
+            ).getBody();
+
+            if (body == null) {
+                return java.util.Optional.empty();
+            }
+
+            return java.util.Optional.of(new PlaylistSummary(
+                    LIKED_SONGS_SOURCE_ID,
+                    LIKED_SONGS_NAME,
+                    body.path("total").asInt(-1)
+            ));
+        } catch (Exception e) {
+            log.warn("Liked Songs unavailable ({}). Re-auth may be required for user-library-read scope.", e.getMessage());
+            return java.util.Optional.empty();
+        }
     }
 
     // -------------------------------------------------------------------------

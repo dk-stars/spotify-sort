@@ -32,6 +32,13 @@ public class TrackTagger {
                     .forEach(tags::add);
         }
 
-        return new TaggedTrack(track.id(), track.name(), track.uri(), tags);
+        return new TaggedTrack(
+            track.id(),
+            track.name(),
+            track.uri(),
+            track.artistNames(),
+            track.albumImageUrl(),
+            tags
+        );
     }
 }

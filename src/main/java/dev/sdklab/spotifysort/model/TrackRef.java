@@ -1,3 +1,11 @@
 package dev.sdklab.spotifysort.model;
 
-public record TrackRef(String trackId, String trackName, String trackUri) {}
+import java.util.List;
+
+public record TrackRef(
+	String trackId,
+	String trackName,
+	String trackUri,
+	List<String> artistNames,
+	String albumImageUrl
+) {}

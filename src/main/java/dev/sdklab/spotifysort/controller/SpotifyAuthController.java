@@ -42,7 +42,7 @@ public class SpotifyAuthController {
     @GetMapping("/login")
     public ResponseEntity<Void> login() {
         AuthorizationCodeUriRequest request = spotifyApi.authorizationCodeUri()
-                .scope("playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public,user-read-private")
+                                .scope("playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public,user-read-private,user-library-read")
                 .build();
 
         URI uri = request.execute();

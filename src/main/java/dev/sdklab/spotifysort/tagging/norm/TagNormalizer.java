@@ -1,6 +1,7 @@
 package dev.sdklab.spotifysort.tagging.norm;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
@@ -39,7 +40,7 @@ public class TagNormalizer {
      * Returns empty Optional if the tag is in the noise denylist.
      */
     public Optional<TagResult> normalize(String rawTag, TagSource source, int weight) {
-        String normalized = rawTag.trim().toLowerCase();
+        String normalized = canonicalize(rawTag);
         if (normalized.isBlank() || noiseDenylist.contains(normalized)) {
             return Optional.empty();
         }
@@ -54,5 +55,13 @@ public class TagNormalizer {
             }
         }
         return false;
+    }
+
+    private String canonicalize(String rawTag) {
+        String normalized = rawTag.trim().toLowerCase(Locale.ROOT);
+        normalized = normalized.replaceAll("[‐-―]", "-");
+        normalized = normalized.replaceAll("(?<=\\p{Alnum})[-_](?=\\p{Alnum})", " ");
+        normalized = normalized.replaceAll("\\s+", " ").trim();
+        return normalized;
     }
 }

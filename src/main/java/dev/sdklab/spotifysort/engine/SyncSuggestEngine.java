@@ -73,7 +73,13 @@ public class SyncSuggestEngine {
 
     private List<TrackRef> toRefs(List<TaggedTrack> tracks) {
         return tracks.stream()
-                .map(t -> new TrackRef(t.trackId(), t.trackName(), t.trackUri()))
+            .map(t -> new TrackRef(
+                t.trackId(),
+                t.trackName(),
+                t.trackUri(),
+                t.artistNames(),
+                t.albumImageUrl()
+            ))
                 .collect(Collectors.toList());
     }
 }
