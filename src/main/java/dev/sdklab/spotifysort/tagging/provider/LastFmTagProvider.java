@@ -14,6 +14,8 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import com.google.common.util.concurrent.RateLimiter;
+
 import dev.sdklab.spotifysort.tagging.api.TagProvider;
 import dev.sdklab.spotifysort.tagging.api.TagResult;
 import dev.sdklab.spotifysort.tagging.api.TagSource;
@@ -29,7 +31,7 @@ public class LastFmTagProvider implements TagProvider {
     private final TagNormalizer tagNormalizer;
     private final String apiKey;
     private final int minTagCount;
-    private final long rateLimitMs;
+    private final RateLimiter rateLimiter;
 
     public LastFmTagProvider(
             RestTemplate restTemplate,
@@ -42,7 +44,7 @@ public class LastFmTagProvider implements TagProvider {
         this.tagNormalizer = tagNormalizer;
         this.apiKey = apiKey;
         this.minTagCount = minTagCount;
-        this.rateLimitMs = rateLimitMs;
+        this.rateLimiter = rateLimitMs <= 0 ? null : RateLimiter.create(1000d / rateLimitMs);
     }
 
     @Override
@@ -125,11 +127,8 @@ public class LastFmTagProvider implements TagProvider {
     }
 
     private void throttle() {
-        if (rateLimitMs <= 0) return;
-        try {
-            Thread.sleep(rateLimitMs);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        if (rateLimiter != null) {
+            rateLimiter.acquire();
         }
     }
 }

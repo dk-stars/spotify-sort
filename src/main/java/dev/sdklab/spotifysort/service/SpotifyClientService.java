@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import org.springframework.http.HttpEntity;
@@ -12,6 +13,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -117,19 +119,34 @@ public class SpotifyClientService {
     }
 
     public List<RawTrack> getPlaylistTracks(Long userId, String playlistId) throws Exception {
+        return getPlaylistTracks(userId, playlistId, (currentRequest, totalRequests) -> {
+        });
+        }
+
+        public List<RawTrack> getPlaylistTracks(
+            Long userId,
+            String playlistId,
+            BiConsumer<Integer, Integer> progressListener
+        ) throws Exception {
         tokenService.getApiForUser(userId);
         User user = userRepository.findById(userId).orElseThrow();
 
         if (LIKED_SONGS_SOURCE_ID.equals(playlistId)) {
             log.info("Fetching saved tracks for user {} from Liked Songs", userId);
-            return fetchTracks(user.getAccessToken(), "https://api.spotify.com/v1/me/tracks?limit=50", LIKED_SONGS_NAME);
+            return fetchTracks(
+                user.getAccessToken(),
+                "https://api.spotify.com/v1/me/tracks?limit=50",
+                LIKED_SONGS_NAME,
+                progressListener
+            );
         }
 
         log.info("Fetching tracks for user {} from playlist {} via /items endpoint", userId, playlistId);
         return fetchTracks(
                 user.getAccessToken(),
                 "https://api.spotify.com/v1/playlists/" + playlistId + "/items?limit=100&additional_types=track",
-                playlistId
+            playlistId,
+            progressListener
         );
     }
 
@@ -144,11 +161,19 @@ public class SpotifyClientService {
                 .collect(Collectors.toSet());
     }
 
-    private List<RawTrack> fetchTracks(String accessToken, String initialUrl, String sourceLabel) {
+    private List<RawTrack> fetchTracks(
+            String accessToken,
+            String initialUrl,
+            String sourceLabel,
+            BiConsumer<Integer, Integer> progressListener
+    ) {
         List<RawTrack> result = new ArrayList<>();
         String nextUrl = initialUrl;
+        int currentRequest = 0;
+        int totalRequests = 0;
 
         while (nextUrl != null) {
+            currentRequest += 1;
             JsonNode body = restTemplate.exchange(
                     nextUrl,
                     HttpMethod.GET,
@@ -157,8 +182,12 @@ public class SpotifyClientService {
             ).getBody();
 
             if (body == null) {
+                progressListener.accept(currentRequest, Math.max(totalRequests, currentRequest));
                 break;
             }
+
+            totalRequests = Math.max(totalRequests, estimateTotalRequests(body, nextUrl));
+            progressListener.accept(currentRequest, Math.max(totalRequests, currentRequest));
 
             JsonNode items = body.get("items");
             if (items != null && items.isArray()) {
@@ -176,6 +205,34 @@ public class SpotifyClientService {
 
         log.info("Fetched {} tracks from {}", result.size(), sourceLabel);
         return result;
+    }
+
+    private int estimateTotalRequests(JsonNode body, String requestUrl) {
+        int totalItems = body.path("total").asInt(-1);
+        int requestLimit = extractRequestLimit(requestUrl);
+
+        if (totalItems <= 0 || requestLimit <= 0) {
+            return 1;
+        }
+
+        return Math.max(1, (int) Math.ceil((double) totalItems / requestLimit));
+    }
+
+    private int extractRequestLimit(String requestUrl) {
+        String limitValue = UriComponentsBuilder.fromUriString(requestUrl)
+                .build()
+                .getQueryParams()
+                .getFirst("limit");
+
+        if (limitValue == null || limitValue.isBlank()) {
+            return 50;
+        }
+
+        try {
+            return Integer.parseInt(limitValue);
+        } catch (NumberFormatException ignored) {
+            return 50;
+        }
     }
 
     private RawTrack toRawTrack(JsonNode item) {

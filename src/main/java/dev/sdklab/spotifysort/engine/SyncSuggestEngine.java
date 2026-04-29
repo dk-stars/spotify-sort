@@ -60,7 +60,7 @@ public class SyncSuggestEngine {
 
             if (existing != null) {
                 // Condition A: existing playlist found
-                playlistsToUpdate.add(new PlaylistUpdate(existing.id(), existing.name(), toRefs(tracks)));
+                playlistsToUpdate.add(new PlaylistUpdate(existing.id(), existing.name(), existing.totalTracks(), toRefs(tracks)));
             } else if (tracks.size() >= threshold) {
                 // Condition B: enough tracks to suggest a new playlist
                 newIdeas.add(new PlaylistIdea(tag, toRefs(tracks)));

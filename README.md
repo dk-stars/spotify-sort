@@ -21,6 +21,8 @@ Set these environment variables in your shell before starting:
 export SPOTIFY_CLIENT_ID=...
 export SPOTIFY_CLIENT_SECRET=...
 export LASTFM_API_KEY=...
+export FRONTEND_URL=http://127.0.0.1:3000
+export SPOTIFY_REDIRECT_URI=http://127.0.0.1:8080/api/auth/callback
 ```
 
 Then run:
@@ -40,6 +42,9 @@ Open:
 Backend:
 
 ```bash
+export SPOTIFY_CLIENT_ID=...
+export SPOTIFY_CLIENT_SECRET=...
+export LASTFM_API_KEY=...
 ./mvnw spring-boot:run
 ```
 
@@ -50,6 +55,8 @@ cd ../spotify-sort-fe
 npm install
 npm run dev
 ```
+
+Deployment and terminal command examples are collected in `refs/run-with-envs.md`.
 
 ## Notes
 

@@ -1,13 +1,13 @@
 services:
   postgres:
-    image: postgres:16-alpine
-    container_name: spotify-sort-postgres
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: ${POSTGRES_CONTAINER_NAME:-spotify-sort-postgres}
     environment:
-      POSTGRES_DB: spotifysort
-      POSTGRES_USER: spotifysort
-      POSTGRES_PASSWORD: spotifysort
+      POSTGRES_DB: ${POSTGRES_DB:-spotifysort}
+      POSTGRES_USER: ${POSTGRES_USER:-spotifysort}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-spotifysort}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,41 +17,49 @@ services:
       retries: 20
 
   backend:
-    image: maven:3.9.8-eclipse-temurin-17
-    container_name: spotify-sort-backend
+    image: ${BACKEND_IMAGE:-maven:3.9.8-eclipse-temurin-17}
+    container_name: ${BACKEND_CONTAINER_NAME:-spotify-sort-backend}
     working_dir: /app
-    command: mvn spring-boot:run
+    command: ${BACKEND_COMMAND:-mvn spring-boot:run}
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/spotifysort
-      SPRING_DATASOURCE_USERNAME: spotifysort
-      SPRING_DATASOURCE_PASSWORD: spotifysort
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/spotifysort}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-spotifysort}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-spotifysort}
+      SERVER_PORT: ${SERVER_PORT:-8080}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
       LASTFM_API_KEY: ${LASTFM_API_KEY:-}
+      LASTFM_MIN_TAG_COUNT: ${LASTFM_MIN_TAG_COUNT:-5}
+      LASTFM_RATE_LIMIT_MS: ${LASTFM_RATE_LIMIT_MS:-200}
+      LASTFM_NOISE_TAGS: ${LASTFM_NOISE_TAGS:-seen live,love,favourite,favorite,favorites,favourites,best,awesome,cool,beautiful,nice,good,great,amazing,sexy,hot,ok}
+      TAGGING_CACHE_TTL_DAYS: ${TAGGING_CACHE_TTL_DAYS:-30}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_HIBERNATE_DDL_AUTO:-update}
       FRONTEND_URL: ${FRONTEND_URL:-http://127.0.0.1:3000}
       SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-http://127.0.0.1:8080/api/auth/callback}
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8080}:${SERVER_PORT:-8080}"
     volumes:
       - .:/app
       - maven_cache:/root/.m2
 
   frontend:
-    image: node:20-alpine
-    container_name: spotify-sort-frontend
+    image: ${FRONTEND_IMAGE:-node:20-alpine}
+    container_name: ${FRONTEND_CONTAINER_NAME:-spotify-sort-frontend}
     working_dir: /app
-    command: sh -lc "npm ci && npm run dev -- --host 0.0.0.0 --port 3000"
+    command: sh -lc "npm ci && npm run dev -- --host ${VITE_DEV_SERVER_HOST:-0.0.0.0} --port ${VITE_DEV_SERVER_PORT:-3000}"
     depends_on:
       backend:
         condition: service_started
     environment:
-      VITE_API_PROXY_TARGET: http://backend:8080
+      VITE_API_PROXY_TARGET: ${VITE_API_PROXY_TARGET:-http://backend:8080}
+      VITE_DEV_SERVER_HOST: ${VITE_DEV_SERVER_HOST:-0.0.0.0}
+      VITE_DEV_SERVER_PORT: ${VITE_DEV_SERVER_PORT:-3000}
       CHOKIDAR_USEPOLLING: "true"
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:${VITE_DEV_SERVER_PORT:-3000}"
     volumes:
       - ../spotify-sort-fe:/app
       - frontend_node_modules:/app/node_modules

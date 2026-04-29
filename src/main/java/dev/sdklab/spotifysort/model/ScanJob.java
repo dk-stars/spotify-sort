@@ -53,6 +53,18 @@ public class ScanJob {
     @Column(nullable = false, columnDefinition = "integer default 0")
     private int progressPercent;
 
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int currentItem;
+
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int totalItems;
+
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int currentFetchRequest;
+
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int totalFetchRequests;
+
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean cancelRequested;
 

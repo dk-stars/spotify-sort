@@ -1,8 +1,11 @@
 package dev.sdklab.spotifysort.tagging.service;
 
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -39,15 +42,37 @@ public class TagEnrichmentService {
      * Returns a map of Spotify track ID → set of normalized tag values.
      */
     public Map<String, Set<String>> enrichTracks(List<RawTrack> tracks) {
-        return tracks.stream()
-                .collect(Collectors.toMap(
-                        RawTrack::id,
-                        this::resolveTagValues
-                ));
+        return enrichTracks(tracks, (current, total) -> {
+        });
     }
 
-    private Set<String> resolveTagValues(RawTrack track) {
-        List<TagResult> tags = resolveTagResults(track);
+    public Map<String, Set<String>> enrichTracks(List<RawTrack> tracks, BiConsumer<Integer, Integer> progressListener) {
+        Map<TrackLookupKey, List<TagResult>> trackRequestCache = new HashMap<>();
+        Map<String, List<TagResult>> artistRequestCache = new HashMap<>();
+        Map<String, Set<String>> enrichedByTrackId = new java.util.LinkedHashMap<>();
+        int totalTracks = tracks.size();
+        int currentTrack = 0;
+
+        for (RawTrack track : tracks) {
+            currentTrack += 1;
+            Set<String> resolved = resolveTagValues(track, trackRequestCache, artistRequestCache);
+            enrichedByTrackId.merge(track.id(), resolved, (left, right) -> {
+                Set<String> merged = new LinkedHashSet<>(left);
+                merged.addAll(right);
+                return merged;
+            });
+            progressListener.accept(currentTrack, totalTracks);
+        }
+
+        return enrichedByTrackId;
+    }
+
+    private Set<String> resolveTagValues(
+            RawTrack track,
+            Map<TrackLookupKey, List<TagResult>> trackRequestCache,
+            Map<String, List<TagResult>> artistRequestCache
+    ) {
+        List<TagResult> tags = resolveTagResults(track, trackRequestCache, artistRequestCache);
         if (tags.isEmpty()) {
             // Last-resort fallback: use artist names as tags
             return track.artistNames().stream()
@@ -59,8 +84,13 @@ public class TagEnrichmentService {
                 .collect(Collectors.toSet());
     }
 
-    private List<TagResult> resolveTagResults(RawTrack track) {
+    private List<TagResult> resolveTagResults(
+            RawTrack track,
+            Map<TrackLookupKey, List<TagResult>> trackRequestCache,
+            Map<String, List<TagResult>> artistRequestCache
+    ) {
         String primaryArtist = track.artistNames().isEmpty() ? "" : track.artistNames().get(0);
+        String trackName = track.name() == null ? "" : track.name();
 
         // 1. Check track-level cache
         if (tagCacheService.isTrackTagsCacheValid(track.id(), TagSource.LAST_FM)) {
@@ -73,8 +103,12 @@ public class TagEnrichmentService {
 
         // 2. Fetch from provider at track level
         List<TagResult> fromTrack = List.of();
-        if (!primaryArtist.isBlank()) {
-            fromTrack = tagProvider.getTagsForTrack(primaryArtist, track.name());
+        if (!primaryArtist.isBlank() && !trackName.isBlank()) {
+            TrackLookupKey lookupKey = new TrackLookupKey(primaryArtist, trackName);
+            fromTrack = trackRequestCache.computeIfAbsent(
+                    lookupKey,
+                    key -> List.copyOf(tagProvider.getTagsForTrack(key.artistName(), key.trackName()))
+            );
         }
 
         if (!fromTrack.isEmpty()) {
@@ -92,7 +126,10 @@ public class TagEnrichmentService {
                     return cachedArtist;
                 }
             }
-            List<TagResult> fromArtist = tagProvider.getTagsForArtist(primaryArtist);
+            List<TagResult> fromArtist = artistRequestCache.computeIfAbsent(
+                    firstArtistId,
+                    key -> List.copyOf(tagProvider.getTagsForArtist(primaryArtist))
+            );
             if (!fromArtist.isEmpty()) {
                 tagCacheService.storeArtistTags(firstArtistId, TagSource.LAST_FM, fromArtist);
                 return fromArtist;
@@ -102,4 +139,6 @@ public class TagEnrichmentService {
         // 4. Provider returned nothing — return empty, caller applies fallback
         return List.of();
     }
+
+    private record TrackLookupKey(String artistName, String trackName) {}
 }

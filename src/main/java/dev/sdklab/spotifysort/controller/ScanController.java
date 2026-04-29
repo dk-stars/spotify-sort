@@ -90,7 +90,11 @@ public class ScanController {
             result,
             job.getErrorMessage(),
             job.getCurrentStep(),
-            job.getProgressPercent()
+            job.getProgressPercent(),
+            job.getCurrentItem(),
+            job.getTotalItems(),
+            job.getCurrentFetchRequest(),
+            job.getTotalFetchRequests()
         ));
     }
 }

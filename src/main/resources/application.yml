@@ -1,34 +1,34 @@
 spring:
   application:
-    name: spotify-sort
+    name: ${SPRING_APPLICATION_NAME:spotify-sort}
   datasource:
-    url: jdbc:postgresql://localhost:5432/spotifysort
-    username: spotifysort
-    password: spotifysort
-    driver-class-name: org.postgresql.Driver
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/spotifysort}
+    username: ${SPRING_DATASOURCE_USERNAME:spotifysort}
+    password: ${SPRING_DATASOURCE_PASSWORD:spotifysort}
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:org.postgresql.Driver}
   jpa:
     hibernate:
-      ddl-auto: update
-    show-sql: false
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
+    show-sql: ${SPRING_JPA_SHOW_SQL:false}
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+        dialect: ${SPRING_JPA_DATABASE_PLATFORM:org.hibernate.dialect.PostgreSQLDialect}
 
 spotify:
-  client-id: ${SPOTIFY_CLIENT_ID:your-client-id}
-  client-secret: ${SPOTIFY_CLIENT_SECRET:your-client-secret}
+  client-id: ${SPOTIFY_CLIENT_ID:}
+  client-secret: ${SPOTIFY_CLIENT_SECRET:}
   redirect-uri: ${SPOTIFY_REDIRECT_URI:http://127.0.0.1:8080/api/auth/callback}
   frontend-url: ${FRONTEND_URL:http://127.0.0.1:3000}
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 lastfm:
   api-key: ${LASTFM_API_KEY:}
-  min-tag-count: 5
-  rate-limit-ms: 200
-  noise-tags: "seen live,love,favourite,favorite,favorites,favourites,best,awesome,cool,beautiful,nice,good,great,amazing,sexy,hot,ok"
+  min-tag-count: ${LASTFM_MIN_TAG_COUNT:5}
+  rate-limit-ms: ${LASTFM_RATE_LIMIT_MS:200}
+  noise-tags: ${LASTFM_NOISE_TAGS:seen live,love,favourite,favorite,favorites,favourites,best,awesome,cool,beautiful,nice,good,great,amazing,sexy,hot,ok}
 
 tagging:
   cache:
-    ttl-days: 30
+    ttl-days: ${TAGGING_CACHE_TTL_DAYS:30}

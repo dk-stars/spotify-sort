@@ -6,5 +6,9 @@ public record ScanStatusResponse(
 	SyncSuggestResult result,
 	String error,
 	String currentStep,
-	int progressPercent
+	int progressPercent,
+	int currentItem,
+	int totalItems,
+	int currentFetchRequest,
+	int totalFetchRequests
 ) {}

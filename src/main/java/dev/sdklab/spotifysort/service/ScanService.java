@@ -1,6 +1,7 @@
 package dev.sdklab.spotifysort.service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,6 +60,10 @@ public class ScanService {
                 .status(ScanStatus.PENDING)
                 .currentStep("Queued")
                 .progressPercent(0)
+                .currentItem(0)
+                .totalItems(0)
+                .currentFetchRequest(0)
+                .totalFetchRequests(0)
                 .cancelRequested(false)
                 .build();
         return scanJobRepository.save(job).getId();
@@ -91,20 +96,14 @@ public class ScanService {
 
             // 1. Fetch all tracks from source playlist
             updateProgress(job, 12, "Loading source tracks…");
-            List<RawTrack> tracks = spotifyClientService.getPlaylistTracks(userId, job.getSourcePlaylistId());
+                List<RawTrack> tracks = spotifyClientService.getPlaylistTracks(userId, job.getSourcePlaylistId(),
+                    (currentRequest, totalRequests) -> updateFetchProgress(job, currentRequest, totalRequests));
+            updateItemProgress(job, 0, tracks.size(), "Loaded source tracks");
             throwIfCancelRequested(jobId);
 
             // 2. Upsert Track entities
             updateProgress(job, 28, "Saving track and artist metadata…");
-            for (RawTrack raw : tracks) {
-                if (!trackRepository.existsBySpotifyId(raw.id())) {
-                    trackRepository.save(Track.builder()
-                            .spotifyId(raw.id())
-                            .name(raw.name())
-                            .uri(raw.uri())
-                            .build());
-                }
-            }
+            saveMissingTracks(tracks);
             throwIfCancelRequested(jobId);
 
             // 3. Upsert Artist entities (deduplicate across tracks)
@@ -120,19 +119,17 @@ public class ScanService {
                     })
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a));
 
-            for (Map.Entry<String, String> entry : artistIdToName.entrySet()) {
-                if (!artistRepository.existsBySpotifyId(entry.getKey())) {
-                    artistRepository.save(Artist.builder()
-                            .spotifyId(entry.getKey())
-                            .name(entry.getValue())
-                            .build());
-                }
-            }
+            saveMissingArtists(artistIdToName);
             throwIfCancelRequested(jobId);
 
             // 4. Enrich tags via Last.fm (with DB caching)
             updateProgress(job, 50, "Enriching genre and mood tags…");
-            Map<String, Set<String>> enrichedTags = tagEnrichmentService.enrichTracks(tracks);
+            int enrichmentUpdateStep = Math.max(1, tracks.size() / 24);
+            Map<String, Set<String>> enrichedTags = tagEnrichmentService.enrichTracks(tracks, (current, total) -> {
+                if (shouldPersistEnrichmentProgress(current, total, enrichmentUpdateStep)) {
+                    updateItemProgress(job, current, total, "Enriching genre and mood tags…");
+                }
+            });
             throwIfCancelRequested(jobId);
 
             // 5. Tag every track
@@ -168,7 +165,7 @@ public class ScanService {
         } catch (Exception e) {
             log.error("Scan job {} failed: {}", jobId, e.getMessage(), e);
             job.setStatus(ScanStatus.FAILED);
-            job.setErrorMessage(e.getMessage());
+            job.setErrorMessage("Scan failed. Please try again.");
             job.setCurrentStep("Scan failed");
         } finally {
             scanJobRepository.save(job);
@@ -184,7 +181,7 @@ public class ScanService {
                     .filter(track -> !existingTrackUris.contains(track.trackUri()))
                     .toList();
             if (!missingTracks.isEmpty()) {
-                filteredUpdates.add(new PlaylistUpdate(update.playlistId(), update.playlistName(), missingTracks));
+                filteredUpdates.add(new PlaylistUpdate(update.playlistId(), update.playlistName(), update.totalTracks(), missingTracks));
             }
         }
 
@@ -195,6 +192,73 @@ public class ScanService {
         job.setProgressPercent(percent);
         job.setCurrentStep(currentStep);
         scanJobRepository.save(job);
+    }
+
+    private void updateItemProgress(ScanJob job, int currentItem, int totalItems, String currentStep) {
+        job.setCurrentItem(currentItem);
+        job.setTotalItems(totalItems);
+        job.setCurrentStep(currentStep);
+        scanJobRepository.save(job);
+    }
+
+    private void updateFetchProgress(ScanJob job, int currentFetchRequest, int totalFetchRequests) {
+        job.setCurrentFetchRequest(currentFetchRequest);
+        job.setTotalFetchRequests(totalFetchRequests);
+        scanJobRepository.save(job);
+    }
+
+    private boolean shouldPersistEnrichmentProgress(int currentItem, int totalItems, int updateStep) {
+        return currentItem <= 1
+                || currentItem >= totalItems
+                || currentItem % updateStep == 0;
+    }
+
+    private void saveMissingTracks(List<RawTrack> tracks) {
+        Set<String> trackIds = tracks.stream()
+            .map(RawTrack::id)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> existingIds = trackRepository.findAllBySpotifyIdIn(trackIds).stream()
+            .map(Track::getSpotifyId)
+            .collect(Collectors.toSet());
+
+        List<Track> missingTracks = tracks.stream()
+            .filter(raw -> !existingIds.contains(raw.id()))
+            .collect(Collectors.toMap(
+                RawTrack::id,
+                raw -> Track.builder()
+                    .spotifyId(raw.id())
+                    .name(raw.name())
+                    .uri(raw.uri())
+                    .build(),
+                (left, right) -> left,
+                java.util.LinkedHashMap::new
+            ))
+            .values()
+            .stream()
+            .toList();
+
+        if (!missingTracks.isEmpty()) {
+            trackRepository.saveAll(missingTracks);
+        }
+    }
+
+    private void saveMissingArtists(Map<String, String> artistIdToName) {
+        Set<String> artistIds = artistIdToName.keySet();
+        Set<String> existingIds = artistRepository.findAllBySpotifyIdIn(artistIds).stream()
+            .map(Artist::getSpotifyId)
+            .collect(Collectors.toSet());
+
+        List<Artist> missingArtists = artistIdToName.entrySet().stream()
+            .filter(entry -> !existingIds.contains(entry.getKey()))
+            .map(entry -> Artist.builder()
+                .spotifyId(entry.getKey())
+                .name(entry.getValue())
+                .build())
+            .toList();
+
+        if (!missingArtists.isEmpty()) {
+            artistRepository.saveAll(missingArtists);
+        }
     }
 
     private void throwIfCancelRequested(Long jobId) {
