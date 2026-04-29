@@ -3,7 +3,6 @@ package dev.sdklab.spotifysort.service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -14,17 +13,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.sdklab.spotifysort.engine.SyncSuggestEngine;
 import dev.sdklab.spotifysort.engine.TrackTagger;
+import dev.sdklab.spotifysort.model.Artist;
 import dev.sdklab.spotifysort.model.PlaylistSummary;
-import dev.sdklab.spotifysort.model.RawArtist;
 import dev.sdklab.spotifysort.model.RawTrack;
 import dev.sdklab.spotifysort.model.ScanJob;
 import dev.sdklab.spotifysort.model.ScanStatus;
 import dev.sdklab.spotifysort.model.SyncSuggestResult;
 import dev.sdklab.spotifysort.model.TaggedTrack;
+import dev.sdklab.spotifysort.model.Track;
+import dev.sdklab.spotifysort.repository.ArtistRepository;
 import dev.sdklab.spotifysort.repository.ScanJobRepository;
+import dev.sdklab.spotifysort.repository.TrackRepository;
+import dev.sdklab.spotifysort.tagging.service.TagEnrichmentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import se.michaelthelin.spotify.model_objects.specification.AudioFeatures;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +35,9 @@ public class ScanService {
 
     private final ScanJobRepository scanJobRepository;
     private final SpotifyClientService spotifyClientService;
+    private final TrackRepository trackRepository;
+    private final ArtistRepository artistRepository;
+    private final TagEnrichmentService tagEnrichmentService;
     private final TrackTagger trackTagger;
     private final SyncSuggestEngine syncSuggestEngine;
     private final ObjectMapper objectMapper;
@@ -67,29 +72,46 @@ public class ScanService {
             // 1. Fetch all tracks from source playlist
             List<RawTrack> tracks = spotifyClientService.getPlaylistTracks(userId, job.getSourcePlaylistId());
 
-            // 2. Collect unique artist IDs across all tracks
-            Set<String> artistIds = tracks.stream()
-                    .flatMap(t -> t.artistIds().stream())
-                    .collect(Collectors.toSet());
+            // 2. Upsert Track entities
+            for (RawTrack raw : tracks) {
+                if (!trackRepository.existsBySpotifyId(raw.id())) {
+                    trackRepository.save(Track.builder()
+                            .spotifyId(raw.id())
+                            .name(raw.name())
+                            .uri(raw.uri())
+                            .build());
+                }
+            }
 
-            // 3. Batch-fetch full Artist objects (needed for genres)
-            Map<String, RawArtist> artistMap = spotifyClientService.getArtistsByIds(userId, artistIds);
+            // 3. Upsert Artist entities (deduplicate across tracks)
+            Map<String, String> artistIdToName = tracks.stream()
+                    .flatMap(t -> {
+                        List<String> ids = t.artistIds();
+                        List<String> names = t.artistNames();
+                        List<Map.Entry<String, String>> pairs = new ArrayList<>();
+                        for (int i = 0; i < ids.size() && i < names.size(); i++) {
+                            pairs.add(Map.entry(ids.get(i), names.get(i)));
+                        }
+                        return pairs.stream();
+                    })
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a));
 
-            // 4. Batch-fetch audio features
-            List<String> trackIds = tracks.stream().map(RawTrack::id).collect(Collectors.toList());
-            Map<String, AudioFeatures> featuresMap = spotifyClientService.getAudioFeatures(userId, trackIds);
+            for (Map.Entry<String, String> entry : artistIdToName.entrySet()) {
+                if (!artistRepository.existsBySpotifyId(entry.getKey())) {
+                    artistRepository.save(Artist.builder()
+                            .spotifyId(entry.getKey())
+                            .name(entry.getValue())
+                            .build());
+                }
+            }
+
+            // 4. Enrich tags via Last.fm (with DB caching)
+            Map<String, Set<String>> enrichedTags = tagEnrichmentService.enrichTracks(tracks);
 
             // 5. Tag every track
-            List<TaggedTrack> taggedTracks = new ArrayList<>();
-            for (RawTrack track : tracks) {
-                List<RawArtist> artists = track.artistIds().stream()
-                        .map(artistMap::get)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-
-                AudioFeatures features = featuresMap.get(track.id());
-                taggedTracks.add(trackTagger.tag(track, artists, features));
-            }
+            List<TaggedTrack> taggedTracks = tracks.stream()
+                    .map(t -> trackTagger.tag(t, enrichedTags))
+                    .collect(Collectors.toList());
 
             // 6. Fetch user's existing playlists for matching
             List<PlaylistSummary> playlists = spotifyClientService.getUserPlaylists(userId);

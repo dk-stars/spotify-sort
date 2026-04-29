@@ -22,3 +22,13 @@ spotify:
 
 server:
   port: 8080
+
+lastfm:
+  api-key: ${LASTFM_API_KEY:}
+  min-tag-count: 5
+  rate-limit-ms: 200
+  noise-tags: "seen live,love,favourite,favorite,favorites,favourites,best,awesome,cool,beautiful,nice,good,great,amazing,sexy,hot,ok"
+
+tagging:
+  cache:
+    ttl-days: 30

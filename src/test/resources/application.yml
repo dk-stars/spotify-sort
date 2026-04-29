@@ -1,0 +1,27 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+    show-sql: false
+
+spotify:
+  client-id: test-client-id
+  client-secret: test-client-secret
+  redirect-uri: http://localhost/callback
+  frontend-url: http://localhost:3000
+
+lastfm:
+  api-key: test-api-key
+  min-tag-count: 1
+  rate-limit-ms: 0
+  noise-tags: "seen live,love"
+
+tagging:
+  cache:
+    ttl-days: 30
