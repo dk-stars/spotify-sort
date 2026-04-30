@@ -1,6 +1,8 @@
 package dev.sdklab.spotifysort.controller;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
 
@@ -9,10 +11,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.RequestAttribute;
 
 import dev.sdklab.spotifysort.model.User;
 import dev.sdklab.spotifysort.repository.UserRepository;
@@ -61,9 +63,18 @@ public class SpotifyAuthController {
         return ResponseEntity.status(HttpStatus.FOUND).location(uri).build();
     }
 
-    @GetMapping("/callback")
-    public ResponseEntity<Void> callback(@RequestParam("code") String code) {
-        try {
+        @GetMapping("/callback")
+        public ResponseEntity<Void> callback(
+                        @RequestParam(name = "code", required = false) String code,
+                        @RequestParam(name = "error", required = false) String error) {
+                try {
+                        if (code == null || code.isBlank()) {
+                                String err = (error != null && !error.isBlank()) ? error : "auth_failed";
+                                String redirect = frontendUrl + "/?error=" + URLEncoder.encode(err, StandardCharsets.UTF_8);
+                                return ResponseEntity.status(HttpStatus.FOUND)
+                                                .location(URI.create(redirect))
+                                                .build();
+                        }
             // Create a fresh SpotifyApi instance for code exchange (singleton may have stale state)
             SpotifyApi authApi = new SpotifyApi.Builder()
                     .setClientId(spotifyApi.getClientId())
