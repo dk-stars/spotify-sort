@@ -6,10 +6,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+
+import jakarta.annotation.PostConstruct;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -35,6 +39,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class ScanService {
+
+    /** In-memory cancel signals per active job; checked on every loop iteration for near-instant interruption. */
+    private final ConcurrentHashMap<Long, AtomicBoolean> cancelFlags = new ConcurrentHashMap<>();
 
     private final ScanJobRepository scanJobRepository;
     private final SpotifyClientService spotifyClientService;
@@ -73,15 +80,45 @@ public class ScanService {
     }
 
     public void requestCancel(Long jobId) {
+        // Signal the running scan thread immediately via in-memory flag (no DB round-trip needed)
+        AtomicBoolean existingFlag = cancelFlags.get(jobId);
+        if (existingFlag != null) {
+            existingFlag.set(true);
+        }
         scanJobRepository.findById(jobId).ifPresent(job -> {
             if (job.getStatus() == ScanStatus.DONE || job.getStatus() == ScanStatus.FAILED || job.getStatus() == ScanStatus.CANCELLED) {
                 return;
             }
             job.setCancelRequested(true);
             job.setStatus(ScanStatus.CANCELLING);
-            job.setCurrentStep("Cancelling scan…");
+            job.setCurrentStep("Cancelling scan\u2026");
             scanJobRepository.save(job);
         });
+    }
+
+    /**
+     * On startup, finalize any jobs that were left in an active state by a previous server instance.
+     * RUNNING/PENDING jobs → FAILED; CANCELLING jobs → CANCELLED.
+     */
+    @PostConstruct
+    public void recoverStuckJobs() {
+        List<ScanJob> stuck = scanJobRepository.findByStatusIn(
+                List.of(ScanStatus.RUNNING, ScanStatus.CANCELLING, ScanStatus.PENDING));
+        for (ScanJob job : stuck) {
+            if (job.getStatus() == ScanStatus.CANCELLING) {
+                job.setStatus(ScanStatus.CANCELLED);
+                job.setCurrentStep("Scan cancelled");
+                job.setCancelRequested(true);
+            } else {
+                job.setStatus(ScanStatus.FAILED);
+                job.setCurrentStep("Scan interrupted");
+                job.setErrorMessage("Scan was interrupted by a server restart.");
+            }
+        }
+        if (!stuck.isEmpty()) {
+            scanJobRepository.saveAll(stuck);
+            log.info("Recovered {} stuck scan job(s) on startup", stuck.size());
+        }
     }
 
     /**
@@ -91,10 +128,15 @@ public class ScanService {
     @Async
     public void runScan(Long jobId) {
         ScanJob job = scanJobRepository.findById(jobId).orElseThrow();
-        if (job.isCancelRequested()) {
+        // Register in-memory cancel flag; initialised from the current DB state so that a cancel
+        // request that arrived before this thread started is honoured immediately.
+        AtomicBoolean cancelFlag = new AtomicBoolean(job.isCancelRequested());
+        cancelFlags.put(jobId, cancelFlag);
+        if (cancelFlag.get()) {
             job.setStatus(ScanStatus.CANCELLED);
             job.setCurrentStep("Scan cancelled");
             scanJobRepository.save(job);
+            cancelFlags.remove(jobId);
             return;
         }
         job.setStatus(ScanStatus.RUNNING);
@@ -135,8 +177,8 @@ public class ScanService {
             // 4. Enrich tags via Last.fm (with DB caching)
             updateProgress(job, 50, "Enriching genre and mood tags…");
             int enrichmentUpdateStep = Math.max(1, tracks.size() / 24);
-            Map<String, Set<String>> enrichedTags = tagEnrichmentService.enrichTracks(tracks, (current, total) -> {
-                if (shouldPersistEnrichmentProgress(current, total, enrichmentUpdateStep)) {
+            Map<String, Set<String>> enrichedTags = tagEnrichmentService.enrichTracks(tracks, (current, total) -> {                // Fast cancel check on every track — in-memory, no DB hit
+                throwIfCancelRequested(jobId);                if (shouldPersistEnrichmentProgress(current, total, enrichmentUpdateStep)) {
                     updateItemProgress(job, current, total, "Enriching genre and mood tags…");
                 }
             });
@@ -178,6 +220,7 @@ public class ScanService {
             job.setErrorMessage("Scan failed. Please try again.");
             job.setCurrentStep("Scan failed");
         } finally {
+            cancelFlags.remove(jobId);
             scanJobRepository.save(job);
         }
     }
@@ -229,6 +272,8 @@ public class ScanService {
 
             List<RawTrack> sourceTracks = spotifyClientService.getPlaylistTracks(userId, sourcePlaylistId,
                     (currentRequest, totalRequests) -> {
+                        // Cancel check on every Spotify page — in-memory, no DB hit
+                        throwIfCancelRequested(jobId);
                         sourceTotalRequests[0] = Math.max(sourceTotalRequests[0], totalRequests);
                         updateFetchProgress(
                                 job,
@@ -341,6 +386,14 @@ public class ScanService {
     }
 
     private void throwIfCancelRequested(Long jobId) {
+        AtomicBoolean flag = cancelFlags.get(jobId);
+        if (flag != null) {
+            // Fast path: in-memory check — no DB round-trip
+            if (flag.get()) throw new ScanCancelledException();
+            return;
+        }
+        // Fallback: DB check (no in-memory flag means the job is not actively running here,
+        // e.g. a stale call after server restart)
         ScanJob freshJob = scanJobRepository.findById(jobId).orElseThrow();
         if (freshJob.isCancelRequested()) {
             throw new ScanCancelledException();

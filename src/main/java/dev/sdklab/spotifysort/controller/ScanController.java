@@ -62,7 +62,7 @@ public class ScanController {
         return ResponseEntity.ok(history);
     }
 
-    @PostMapping("/{jobId}/cancel")
+    @PostMapping("/{jobId:[0-9]+}/cancel")
     public ResponseEntity<?> cancelScan(
             @RequestAttribute(name = "userId", required = false) Long userId,
             @PathVariable Long jobId) {
@@ -78,7 +78,7 @@ public class ScanController {
         return ResponseEntity.accepted().body(Map.of("jobId", jobId, "status", "CANCELLING"));
     }
 
-    @GetMapping("/{jobId}")
+    @GetMapping("/{jobId:[0-9]+}")
     public ResponseEntity<?> getStatus(
             @RequestAttribute(name = "userId", required = false) Long userId,
             @PathVariable Long jobId) {

@@ -6,10 +6,13 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import dev.sdklab.spotifysort.model.ScanJob;
+import dev.sdklab.spotifysort.model.ScanStatus;
 
 public interface ScanJobRepository extends JpaRepository<ScanJob, Long> {
 
 	Optional<ScanJob> findByIdAndUserId(Long id, Long userId);
 
 	List<ScanJob> findByUserIdOrderByCreatedAtDesc(Long userId);
+
+	List<ScanJob> findByStatusIn(List<ScanStatus> statuses);
 }

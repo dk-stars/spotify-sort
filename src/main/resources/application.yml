@@ -32,3 +32,6 @@ lastfm:
 tagging:
   cache:
     ttl-days: ${TAGGING_CACHE_TTL_DAYS:30}
+
+jwt:
+  secret: ${JWT_SECRET:a_temporary_default_for_local_dev_only}
