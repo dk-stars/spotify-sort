@@ -34,6 +34,9 @@ public class ScanJob {
     @Column(nullable = false)
     private String sourcePlaylistId;
 
+    @Column(columnDefinition = "TEXT")
+    private String sourcePlaylistIdsJson;
+
     @Column(nullable = false)
     private int threshold;
 
@@ -43,6 +46,18 @@ public class ScanJob {
 
     @Column(columnDefinition = "TEXT")
     private String resultJson;
+
+    @Column(columnDefinition = "TEXT")
+    private String executionRequestJson;
+
+    @Column(columnDefinition = "TEXT")
+    private String executionSummaryJson;
+
+    @Column(columnDefinition = "TEXT")
+    private String createdPlaylistIdsJson;
+
+    @Column(columnDefinition = "TEXT")
+    private String sourceDeletionActionsJson;
 
     @Column(length = 2048)
     private String errorMessage;
@@ -67,6 +82,16 @@ public class ScanJob {
 
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean cancelRequested;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean applied;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean undone;
+
+    private Instant appliedAt;
+
+    private Instant undoneAt;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

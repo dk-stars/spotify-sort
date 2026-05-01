@@ -1,6 +1,7 @@
 package dev.sdklab.spotifysort.service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -48,14 +49,14 @@ public class ScanService {
      * Persists a new PENDING scan job and returns its ID.
      * The caller is responsible for triggering {@link #runScan(Long)} afterwards.
      */
-    public Long createScan(Long userId, String sourcePlaylistId, int threshold) {
-        String effectiveSourcePlaylistId = (sourcePlaylistId == null || sourcePlaylistId.isBlank())
-            ? SpotifyClientService.LIKED_SONGS_SOURCE_ID
-            : sourcePlaylistId;
+    public Long createScan(Long userId, List<String> sourcePlaylistIds, int threshold) {
+        List<String> effectiveSourcePlaylistIds = resolveRequestedSourcePlaylistIds(sourcePlaylistIds);
+        String primarySourcePlaylistId = effectiveSourcePlaylistIds.get(0);
 
         ScanJob job = ScanJob.builder()
                 .userId(userId)
-            .sourcePlaylistId(effectiveSourcePlaylistId)
+                .sourcePlaylistId(primarySourcePlaylistId)
+                .sourcePlaylistIdsJson(writeValue(effectiveSourcePlaylistIds))
                 .threshold(threshold)
                 .status(ScanStatus.PENDING)
                 .currentStep("Queued")
@@ -65,6 +66,8 @@ public class ScanService {
                 .currentFetchRequest(0)
                 .totalFetchRequests(0)
                 .cancelRequested(false)
+                .applied(false)
+                .undone(false)
                 .build();
         return scanJobRepository.save(job).getId();
     }
@@ -75,6 +78,7 @@ public class ScanService {
                 return;
             }
             job.setCancelRequested(true);
+            job.setStatus(ScanStatus.CANCELLING);
             job.setCurrentStep("Cancelling scan…");
             scanJobRepository.save(job);
         });
@@ -87,17 +91,23 @@ public class ScanService {
     @Async
     public void runScan(Long jobId) {
         ScanJob job = scanJobRepository.findById(jobId).orElseThrow();
+        if (job.isCancelRequested()) {
+            job.setStatus(ScanStatus.CANCELLED);
+            job.setCurrentStep("Scan cancelled");
+            scanJobRepository.save(job);
+            return;
+        }
         job.setStatus(ScanStatus.RUNNING);
         updateProgress(job, 2, "Starting scan…");
 
         try {
             Long userId = job.getUserId();
+            List<String> sourcePlaylistIds = resolveSourcePlaylistIds(job);
             throwIfCancelRequested(jobId);
 
             // 1. Fetch all tracks from source playlist
             updateProgress(job, 12, "Loading source tracks…");
-                List<RawTrack> tracks = spotifyClientService.getPlaylistTracks(userId, job.getSourcePlaylistId(),
-                    (currentRequest, totalRequests) -> updateFetchProgress(job, currentRequest, totalRequests));
+            List<RawTrack> tracks = loadTracksFromSources(userId, sourcePlaylistIds, jobId, job);
             updateItemProgress(job, 0, tracks.size(), "Loaded source tracks");
             throwIfCancelRequested(jobId);
 
@@ -207,10 +217,79 @@ public class ScanService {
         scanJobRepository.save(job);
     }
 
+    private List<RawTrack> loadTracksFromSources(Long userId, List<String> sourcePlaylistIds, Long jobId, ScanJob job) throws Exception {
+        Map<String, RawTrack> deduplicatedTracks = new LinkedHashMap<>();
+        int completedFetchRequests = 0;
+
+        for (String sourcePlaylistId : sourcePlaylistIds) {
+            throwIfCancelRequested(jobId);
+
+            final int requestOffset = completedFetchRequests;
+            final int[] sourceTotalRequests = {0};
+
+            List<RawTrack> sourceTracks = spotifyClientService.getPlaylistTracks(userId, sourcePlaylistId,
+                    (currentRequest, totalRequests) -> {
+                        sourceTotalRequests[0] = Math.max(sourceTotalRequests[0], totalRequests);
+                        updateFetchProgress(
+                                job,
+                                requestOffset + currentRequest,
+                                Math.max(requestOffset + totalRequests, requestOffset + currentRequest)
+                        );
+                    });
+
+            for (RawTrack track : sourceTracks) {
+                deduplicatedTracks.putIfAbsent(track.id(), track);
+            }
+
+            completedFetchRequests += Math.max(sourceTotalRequests[0], 1);
+            updateFetchProgress(job, completedFetchRequests, completedFetchRequests);
+        }
+
+        return new ArrayList<>(deduplicatedTracks.values());
+    }
+
     private boolean shouldPersistEnrichmentProgress(int currentItem, int totalItems, int updateStep) {
         return currentItem <= 1
                 || currentItem >= totalItems
                 || currentItem % updateStep == 0;
+    }
+
+    private List<String> resolveRequestedSourcePlaylistIds(List<String> sourcePlaylistIds) {
+        if (sourcePlaylistIds == null || sourcePlaylistIds.isEmpty()) {
+            return List.of(SpotifyClientService.LIKED_SONGS_SOURCE_ID);
+        }
+
+        List<String> normalized = sourcePlaylistIds.stream()
+                .filter(sourceId -> sourceId != null && !sourceId.isBlank())
+                .distinct()
+                .toList();
+
+        return normalized.isEmpty() ? List.of(SpotifyClientService.LIKED_SONGS_SOURCE_ID) : normalized;
+    }
+
+    public List<String> resolveSourcePlaylistIds(ScanJob job) {
+        String sourcePlaylistIdsJson = job.getSourcePlaylistIdsJson();
+        if (sourcePlaylistIdsJson == null || sourcePlaylistIdsJson.isBlank()) {
+            return List.of(job.getSourcePlaylistId());
+        }
+
+        try {
+            return resolveRequestedSourcePlaylistIds(objectMapper.readValue(
+                    sourcePlaylistIdsJson,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, String.class)
+            ));
+        } catch (Exception e) {
+            log.warn("Failed to deserialize source playlist ids for job {}", job.getId(), e);
+            return List.of(job.getSourcePlaylistId());
+        }
+    }
+
+    private String writeValue(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to serialize scan job payload", e);
+        }
     }
 
     private void saveMissingTracks(List<RawTrack> tracks) {

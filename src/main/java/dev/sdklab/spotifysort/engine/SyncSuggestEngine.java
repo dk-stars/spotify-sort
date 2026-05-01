@@ -68,6 +68,8 @@ public class SyncSuggestEngine {
             // Condition C: below threshold, no existing playlist — silently ignored
         }
 
+        newIdeas.sort((left, right) -> Integer.compare(right.tracks().size(), left.tracks().size()));
+
         return new SyncSuggestResult(playlistsToUpdate, newIdeas);
     }
 

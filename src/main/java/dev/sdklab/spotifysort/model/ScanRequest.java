@@ -1,3 +1,5 @@
 package dev.sdklab.spotifysort.model;
 
-public record ScanRequest(String sourcePlaylistId, int threshold) {}
+import java.util.List;
+
+public record ScanRequest(List<String> sourcePlaylistIds, int threshold) {}

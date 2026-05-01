@@ -1,5 +1,6 @@
 package dev.sdklab.spotifysort.controller;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
@@ -7,13 +8,16 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import dev.sdklab.spotifysort.model.ExecuteRequest;
+import dev.sdklab.spotifysort.model.ExecuteSummary;
+import dev.sdklab.spotifysort.model.ScanHistoryItemResponse;
 import dev.sdklab.spotifysort.model.ScanJob;
 import dev.sdklab.spotifysort.model.ScanRequest;
 import dev.sdklab.spotifysort.model.ScanStatus;
@@ -41,10 +45,21 @@ public class ScanController {
 
         if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 
-        Long jobId = scanService.createScan(userId, request.sourcePlaylistId(), request.threshold());
+        Long jobId = scanService.createScan(userId, request.sourcePlaylistIds(), request.threshold());
         scanService.runScan(jobId);  // @Async — returns immediately
 
         return ResponseEntity.accepted().body(Map.of("jobId", jobId));
+    }
+
+    @GetMapping("/history")
+    public ResponseEntity<?> history(@RequestAttribute(name = "userId", required = false) Long userId) {
+        if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+
+        List<ScanHistoryItemResponse> history = scanJobRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(this::toHistoryItem)
+                .toList();
+
+        return ResponseEntity.ok(history);
     }
 
     @PostMapping("/{jobId}/cancel")
@@ -54,7 +69,7 @@ public class ScanController {
 
         if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 
-        ScanJob job = scanJobRepository.findById(jobId).orElse(null);
+        ScanJob job = scanJobRepository.findByIdAndUserId(jobId, userId).orElse(null);
         if (job == null || !job.getUserId().equals(userId)) {
             return ResponseEntity.notFound().build();
         }
@@ -70,8 +85,8 @@ public class ScanController {
 
         if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 
-        ScanJob job = scanJobRepository.findById(jobId).orElse(null);
-        if (job == null || !job.getUserId().equals(userId)) {
+        ScanJob job = scanJobRepository.findByIdAndUserId(jobId, userId).orElse(null);
+        if (job == null) {
             return ResponseEntity.notFound().build();
         }
 
@@ -84,6 +99,10 @@ public class ScanController {
             }
         }
 
+        List<String> sourcePlaylistIds = scanService.resolveSourcePlaylistIds(job);
+        ExecuteRequest executionRequest = readValue(job.getExecutionRequestJson(), ExecuteRequest.class);
+        ExecuteSummary executionSummary = readValue(job.getExecutionSummaryJson(), ExecuteSummary.class);
+
         return ResponseEntity.ok(new ScanStatusResponse(
             jobId,
             job.getStatus(),
@@ -94,7 +113,53 @@ public class ScanController {
             job.getCurrentItem(),
             job.getTotalItems(),
             job.getCurrentFetchRequest(),
-            job.getTotalFetchRequests()
+            job.getTotalFetchRequests(),
+            job.getCreatedAt(),
+            sourcePlaylistIds,
+            job.getThreshold(),
+            job.isApplied(),
+            job.isUndone(),
+            canUndo(job, executionRequest),
+            executionRequest,
+            executionSummary
         ));
+    }
+
+    private ScanHistoryItemResponse toHistoryItem(ScanJob job) {
+        ExecuteRequest executionRequest = readValue(job.getExecutionRequestJson(), ExecuteRequest.class);
+        return new ScanHistoryItemResponse(
+                job.getId(),
+                job.getStatus(),
+                job.getCurrentStep(),
+                job.getProgressPercent(),
+                job.getCurrentItem(),
+                job.getTotalItems(),
+                job.getCreatedAt(),
+                scanService.resolveSourcePlaylistIds(job),
+                job.getThreshold(),
+                job.getResultJson() != null,
+                job.isApplied(),
+                job.isUndone(),
+                canUndo(job, executionRequest)
+        );
+    }
+
+    private boolean canUndo(ScanJob job, ExecuteRequest executionRequest) {
+        if (!job.isApplied() || job.isUndone() || executionRequest == null) {
+            return false;
+        }
+        return !executionRequest.updates().isEmpty() || !executionRequest.creates().isEmpty();
+    }
+
+    private <T> T readValue(String raw, Class<T> type) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(raw, type);
+        } catch (Exception e) {
+            log.error("Failed to deserialize {}", type.getSimpleName(), e);
+            return null;
+        }
     }
 }

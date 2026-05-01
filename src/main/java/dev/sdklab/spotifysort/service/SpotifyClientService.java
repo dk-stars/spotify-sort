@@ -152,7 +152,9 @@ public class SpotifyClientService {
 
     public Set<String> getPlaylistTrackUris(Long userId, String playlistId) throws Exception {
         if (LIKED_SONGS_SOURCE_ID.equals(playlistId)) {
-            return Set.of();
+            return getPlaylistTracks(userId, playlistId).stream()
+                    .map(RawTrack::uri)
+                    .collect(Collectors.toSet());
         }
 
         List<RawTrack> tracks = getPlaylistTracks(userId, playlistId);
