@@ -2,6 +2,7 @@ package dev.sdklab.spotifysort.model;
 
 import java.time.Instant;
 
+import dev.sdklab.spotifysort.tagging.api.ProviderMode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -92,6 +93,13 @@ public class ScanJob {
     private Instant appliedAt;
 
     private Instant undoneAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 32)
+    private ProviderMode providerMode;
+
+    @Column(columnDefinition = "TEXT")
+    private String taggingStatsJson;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

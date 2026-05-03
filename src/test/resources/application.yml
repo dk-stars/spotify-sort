@@ -9,6 +9,8 @@ spring:
       ddl-auto: create-drop
     database-platform: org.hibernate.dialect.H2Dialect
     show-sql: false
+  flyway:
+    enabled: false
 
 spotify:
   client-id: test-client-id
@@ -25,3 +27,9 @@ lastfm:
 tagging:
   cache:
     ttl-days: 30
+
+openai:
+  api-key: ""
+
+jwt:
+  secret: test-secret-for-unit-tests-only-not-used-in-production

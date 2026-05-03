@@ -45,7 +45,8 @@ public class ScanController {
 
         if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 
-        Long jobId = scanService.createScan(userId, request.sourcePlaylistIds(), request.threshold());
+        Long jobId = scanService.createScan(userId, request.sourcePlaylistIds(), request.threshold(),
+                request.providerMode() != null ? request.providerMode() : dev.sdklab.spotifysort.tagging.api.ProviderMode.LASTFM_ONLY);
         scanService.runScan(jobId);  // @Async — returns immediately
 
         return ResponseEntity.accepted().body(Map.of("jobId", jobId));
@@ -121,7 +122,8 @@ public class ScanController {
             job.isUndone(),
             canUndo(job, executionRequest),
             executionRequest,
-            executionSummary
+            executionSummary,
+            job.getProviderMode()
         ));
     }
 
@@ -140,7 +142,8 @@ public class ScanController {
                 job.getResultJson() != null,
                 job.isApplied(),
                 job.isUndone(),
-                canUndo(job, executionRequest)
+                canUndo(job, executionRequest),
+                job.getProviderMode()
         );
     }
 
