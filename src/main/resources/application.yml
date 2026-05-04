@@ -46,7 +46,7 @@ tagging:
 
 openai:
   api-key: ${OPENAI_API_KEY:}
-  model: ${OPENAI_MODEL:gpt-4o-mini}
+  model: ${OPENAI_MODEL:gpt-5.4-nano}
   base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
   batch-size: ${OPENAI_BATCH_SIZE:20}
   max-genres: ${OPENAI_MAX_GENRES:2}
