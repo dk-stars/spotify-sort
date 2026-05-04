@@ -6,7 +6,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -16,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -62,6 +62,11 @@ public class PlaylistExecutionService {
             totalTracksAdded += addTracksToPlaylist(accessToken, playlistId, action.trackUris());
         }
 
+        // Invalidate playlists cache so frontend sees newly created playlists immediately
+        if (!createdPlaylistIds.isEmpty()) {
+            spotifyClientService.invalidateUserPlaylistsCache(userId);
+        }
+
         ExecuteSummary summary = new ExecuteSummary(
                 request.updates().size(),
                 request.creates().size(),
@@ -97,6 +102,11 @@ public class PlaylistExecutionService {
 
         for (String playlistId : createdPlaylistIds) {
             deletePlaylist(user.getAccessToken(), playlistId);
+        }
+
+        // Invalidate playlists cache so frontend does not show deleted playlists
+        if (!createdPlaylistIds.isEmpty()) {
+            spotifyClientService.invalidateUserPlaylistsCache(userId);
         }
 
         for (SourceDeletionAction action : sourceDeletionActions) {
@@ -269,13 +279,19 @@ public class PlaylistExecutionService {
     }
 
     private void removeTracksFromLikedSongs(String accessToken, List<String> trackUris) {
-        for (int i = 0; i < trackUris.size(); i += 50) {
-            List<String> batch = trackUris.subList(i, Math.min(i + 50, trackUris.size()));
-            String ids = batch.stream().map(this::toTrackId).collect(Collectors.joining(","));
+        // Spotify deprecated /v1/me/tracks — use /v1/me/library with URIs (max 40 per request)
+        for (int i = 0; i < trackUris.size(); i += 40) {
+            List<String> batch = trackUris.subList(i, Math.min(i + 40, trackUris.size()));
+            String urisParam = String.join(",", batch);
+
+            String url = UriComponentsBuilder
+                    .fromHttpUrl("https://api.spotify.com/v1/me/library")
+                    .queryParam("uris", urisParam)
+                    .toUriString();
 
             try {
                 restTemplate.exchange(
-                        "https://api.spotify.com/v1/me/tracks?ids=" + ids,
+                        url,
                         HttpMethod.DELETE,
                         new HttpEntity<>(authorizedJsonHeaders(accessToken)),
                         Void.class
@@ -290,13 +306,19 @@ public class PlaylistExecutionService {
     }
 
     private void addTracksToLikedSongs(String accessToken, List<String> trackUris) {
-        for (int i = 0; i < trackUris.size(); i += 50) {
-            List<String> batch = trackUris.subList(i, Math.min(i + 50, trackUris.size()));
-            String ids = batch.stream().map(this::toTrackId).collect(Collectors.joining(","));
+        // Spotify deprecated /v1/me/tracks — use /v1/me/library with URIs (max 40 per request)
+        for (int i = 0; i < trackUris.size(); i += 40) {
+            List<String> batch = trackUris.subList(i, Math.min(i + 40, trackUris.size()));
+            String urisParam = String.join(",", batch);
+
+            String url = UriComponentsBuilder
+                    .fromHttpUrl("https://api.spotify.com/v1/me/library")
+                    .queryParam("uris", urisParam)
+                    .toUriString();
 
             try {
                 restTemplate.exchange(
-                        "https://api.spotify.com/v1/me/tracks?ids=" + ids,
+                        url,
                         HttpMethod.PUT,
                         new HttpEntity<>(authorizedJsonHeaders(accessToken)),
                         Void.class

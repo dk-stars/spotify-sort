@@ -72,6 +72,12 @@ public class SpotifyClientService {
         return getUserPlaylists(userId, true);
     }
 
+    /** Invalidate cached playlist list for the given user. */
+    public void invalidateUserPlaylistsCache(Long userId) {
+        userPlaylistsCache.keySet().removeIf(key -> key.userId().equals(userId));
+        log.debug("Invalidated playlists cache for user {}", userId);
+    }
+
     public List<PlaylistSummary> getUserPlaylists(Long userId, boolean includeLikedSongs) throws Exception {
         PlaylistCacheKey cacheKey = new PlaylistCacheKey(userId, includeLikedSongs);
         CachedValue<List<PlaylistSummary>> cachedValue = userPlaylistsCache.get(cacheKey);

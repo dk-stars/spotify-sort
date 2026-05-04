@@ -54,7 +54,8 @@ public class SpotifyAuthController {
                         AuthorizationScope.PLAYLIST_MODIFY_PRIVATE,
                         AuthorizationScope.PLAYLIST_MODIFY_PUBLIC,
                         AuthorizationScope.USER_READ_PRIVATE,
-                        AuthorizationScope.USER_LIBRARY_READ
+                        AuthorizationScope.USER_LIBRARY_READ,
+                        AuthorizationScope.USER_LIBRARY_MODIFY
                 )
                 .show_dialog(true)
                 .build();
