@@ -13,12 +13,21 @@ spring:
     properties:
       hibernate:
         dialect: ${SPRING_JPA_DATABASE_PLATFORM:org.hibernate.dialect.PostgreSQLDialect}
+  flyway:
+    enabled: true
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 1
+    locations: classpath:db/migration
 
 spotify:
   client-id: ${SPOTIFY_CLIENT_ID:}
   client-secret: ${SPOTIFY_CLIENT_SECRET:}
   redirect-uri: ${SPOTIFY_REDIRECT_URI:http://127.0.0.1:8080/api/auth/callback}
   frontend-url: ${FRONTEND_URL:http://127.0.0.1:3000}
+  playlists-cache-ttl-seconds: ${SPOTIFY_PLAYLISTS_CACHE_TTL_SECONDS:300}
+  retry:
+    max-attempts: ${SPOTIFY_RETRY_MAX_ATTEMPTS:3}
+    default-delay-ms: ${SPOTIFY_RETRY_DEFAULT_DELAY_MS:1000}
 
 server:
   port: ${SERVER_PORT:8080}
@@ -32,6 +41,21 @@ lastfm:
 tagging:
   cache:
     ttl-days: ${TAGGING_CACHE_TTL_DAYS:30}
+  llm:
+    unknown-ttl-days: ${TAGGING_LLM_UNKNOWN_TTL_DAYS:30}
+
+openai:
+  api-key: ${OPENAI_API_KEY:}
+  model: ${OPENAI_MODEL:gpt-5.4-nano}
+  base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+  batch-size: ${OPENAI_BATCH_SIZE:20}
+  max-genres: ${OPENAI_MAX_GENRES:2}
+  max-moods: ${OPENAI_MAX_MOODS:2}
 
 jwt:
   secret: ${JWT_SECRET:a_temporary_default_for_local_dev_only}
+
+logging:
+  level:
+    dev.sdklab.spotifysort.service.SpotifyClientService: ${LOG_LEVEL_SPOTIFY_CLIENT:INFO}
+    dev.sdklab.spotifysort.tagging.service.TagEnrichmentService: ${LOG_LEVEL_TAG_ENRICHMENT:INFO}

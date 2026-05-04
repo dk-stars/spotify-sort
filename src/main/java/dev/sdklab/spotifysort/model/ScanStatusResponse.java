@@ -3,6 +3,8 @@ package dev.sdklab.spotifysort.model;
 import java.time.Instant;
 import java.util.List;
 
+import dev.sdklab.spotifysort.tagging.api.ProviderMode;
+
 public record ScanStatusResponse(
 	Long jobId,
 	ScanStatus status,
@@ -21,5 +23,6 @@ public record ScanStatusResponse(
 	boolean undone,
 	boolean canUndo,
 	ExecuteRequest executionRequest,
-	ExecuteSummary executionSummary
+	ExecuteSummary executionSummary,
+	ProviderMode providerMode
 ) {}

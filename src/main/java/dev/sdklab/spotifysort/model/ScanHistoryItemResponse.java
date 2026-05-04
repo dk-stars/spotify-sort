@@ -3,6 +3,8 @@ package dev.sdklab.spotifysort.model;
 import java.time.Instant;
 import java.util.List;
 
+import dev.sdklab.spotifysort.tagging.api.ProviderMode;
+
 public record ScanHistoryItemResponse(
         Long jobId,
         ScanStatus status,
@@ -16,5 +18,6 @@ public record ScanHistoryItemResponse(
         boolean hasResult,
         boolean applied,
         boolean undone,
-        boolean canUndo
+        boolean canUndo,
+        ProviderMode providerMode
 ) {}

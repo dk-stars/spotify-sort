@@ -13,8 +13,6 @@ import java.util.stream.Collectors;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.sdklab.spotifysort.engine.SyncSuggestEngine;
@@ -32,6 +30,7 @@ import dev.sdklab.spotifysort.repository.ArtistRepository;
 import dev.sdklab.spotifysort.repository.ScanJobRepository;
 import dev.sdklab.spotifysort.repository.TrackRepository;
 import dev.sdklab.spotifysort.tagging.service.TagEnrichmentService;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -57,6 +56,10 @@ public class ScanService {
      * The caller is responsible for triggering {@link #runScan(Long)} afterwards.
      */
     public Long createScan(Long userId, List<String> sourcePlaylistIds, int threshold) {
+        return createScan(userId, sourcePlaylistIds, threshold, dev.sdklab.spotifysort.tagging.api.ProviderMode.LASTFM_ONLY);
+    }
+
+    public Long createScan(Long userId, List<String> sourcePlaylistIds, int threshold, dev.sdklab.spotifysort.tagging.api.ProviderMode providerMode) {
         List<String> effectiveSourcePlaylistIds = resolveRequestedSourcePlaylistIds(sourcePlaylistIds);
         String primarySourcePlaylistId = effectiveSourcePlaylistIds.get(0);
 
@@ -65,6 +68,7 @@ public class ScanService {
                 .sourcePlaylistId(primarySourcePlaylistId)
                 .sourcePlaylistIdsJson(writeValue(effectiveSourcePlaylistIds))
                 .threshold(threshold)
+                .providerMode(providerMode)
                 .status(ScanStatus.PENDING)
                 .currentStep("Queued")
                 .progressPercent(0)
@@ -174,36 +178,45 @@ public class ScanService {
             saveMissingArtists(artistIdToName);
             throwIfCancelRequested(jobId);
 
-            // 4. Enrich tags via Last.fm (with DB caching)
-            updateProgress(job, 50, "Enriching genre and mood tags…");
+            // 4. Enrich tags via configured provider (with DB caching)
+            dev.sdklab.spotifysort.tagging.api.ProviderMode providerMode =
+                    job.getProviderMode() != null ? job.getProviderMode()
+                            : dev.sdklab.spotifysort.tagging.api.ProviderMode.LASTFM_ONLY;
+            String modeLabel = providerMode == dev.sdklab.spotifysort.tagging.api.ProviderMode.LASTFM_ONLY
+                    ? "Last.fm" : providerMode == dev.sdklab.spotifysort.tagging.api.ProviderMode.LLM_ONLY
+                    ? "AI" : "Last.fm + AI";
+            updateProgress(job, 32, "Enriching genre and mood tags (" + modeLabel + ")…");
             int enrichmentUpdateStep = Math.max(1, tracks.size() / 24);
-            Map<String, Set<String>> enrichedTags = tagEnrichmentService.enrichTracks(tracks, (current, total) -> {                // Fast cancel check on every track — in-memory, no DB hit
-                throwIfCancelRequested(jobId);                if (shouldPersistEnrichmentProgress(current, total, enrichmentUpdateStep)) {
-                    updateItemProgress(job, current, total, "Enriching genre and mood tags…");
+            Map<String, Set<String>> enrichedTags = tagEnrichmentService.enrichTracks(tracks, providerMode, (current, total) -> {
+                // Fast cancel check on every track — in-memory, no DB hit
+                throwIfCancelRequested(jobId);
+                if (shouldPersistEnrichmentProgress(current, total, enrichmentUpdateStep)) {
+                    updateTagProgress(job, current, total, "Enriching genre and mood tags (" + modeLabel + ")…");
                 }
             });
             throwIfCancelRequested(jobId);
 
             // 5. Tag every track
-            updateProgress(job, 64, "Building tag groups…");
+            updateProgress(job, 56, "Building tag groups…");
             List<TaggedTrack> taggedTracks = tracks.stream()
                     .map(t -> trackTagger.tag(t, enrichedTags))
                     .collect(Collectors.toList());
             throwIfCancelRequested(jobId);
 
             // 6. Fetch user's existing playlists for matching
-            updateProgress(job, 76, "Loading existing playlists…");
+            updateProgress(job, 60, "Loading existing playlists…");
             List<PlaylistSummary> playlists = spotifyClientService.getUserPlaylists(userId);
+            log.info("Scan job {} loaded {} existing playlists for matching", jobId, playlists.size());
             throwIfCancelRequested(jobId);
 
             // 7. Run Sync & Suggest
-            updateProgress(job, 88, "Filtering existing playlist matches…");
+            updateProgress(job, 72, "Filtering existing playlist matches…");
             SyncSuggestResult result = syncSuggestEngine.analyze(taggedTracks, playlists, job.getThreshold());
             result = filterAlreadyIncludedTracks(userId, result, jobId);
             throwIfCancelRequested(jobId);
 
             // 8. Persist result
-            updateProgress(job, 96, "Finalizing proposal…");
+            updateProgress(job, 90, "Finalizing proposal…");
             job.setResultJson(objectMapper.writeValueAsString(result));
             job.setStatus(ScanStatus.DONE);
             job.setCurrentStep("Scan complete");
@@ -227,16 +240,26 @@ public class ScanService {
 
     private SyncSuggestResult filterAlreadyIncludedTracks(Long userId, SyncSuggestResult result, Long jobId) throws Exception {
         List<PlaylistUpdate> filteredUpdates = new ArrayList<>();
+        int skippedDuplicates = 0;
         for (PlaylistUpdate update : result.playlistsToUpdate()) {
             throwIfCancelRequested(jobId);
             Set<String> existingTrackUris = spotifyClientService.getPlaylistTrackUris(userId, update.playlistId());
             List<dev.sdklab.spotifysort.model.TrackRef> missingTracks = update.tracks().stream()
                     .filter(track -> !existingTrackUris.contains(track.trackUri()))
                     .toList();
+            skippedDuplicates += update.tracks().size() - missingTracks.size();
             if (!missingTracks.isEmpty()) {
                 filteredUpdates.add(new PlaylistUpdate(update.playlistId(), update.playlistName(), update.totalTracks(), missingTracks));
             }
         }
+
+        log.info(
+                "Filtered playlist updates for job {}: candidatePlaylists={}, remainingPlaylists={}, skippedExistingTracks={}",
+                jobId,
+                result.playlistsToUpdate().size(),
+                filteredUpdates.size(),
+                skippedDuplicates
+        );
 
         return new SyncSuggestResult(filteredUpdates, result.newIdeas());
     }
@@ -251,6 +274,14 @@ public class ScanService {
         job.setCurrentItem(currentItem);
         job.setTotalItems(totalItems);
         job.setCurrentStep(currentStep);
+        scanJobRepository.save(job);
+    }
+
+    private void updateTagProgress(ScanJob job, int currentItem, int totalItems, String currentStep) {
+        job.setCurrentItem(currentItem);
+        job.setTotalItems(totalItems);
+        job.setCurrentStep(currentStep);
+        job.setProgressPercent(computePhaseProgress(currentItem, totalItems, 32, 55));
         scanJobRepository.save(job);
     }
 
@@ -297,6 +328,16 @@ public class ScanService {
         return currentItem <= 1
                 || currentItem >= totalItems
                 || currentItem % updateStep == 0;
+    }
+
+    private int computePhaseProgress(int currentItem, int totalItems, int startPercent, int endPercent) {
+        if (totalItems <= 0) {
+            return startPercent;
+        }
+
+        int boundedCurrent = Math.max(0, Math.min(currentItem, totalItems));
+        int phaseSpan = Math.max(0, endPercent - startPercent);
+        return startPercent + (int) Math.round((boundedCurrent / (double) totalItems) * phaseSpan);
     }
 
     private List<String> resolveRequestedSourcePlaylistIds(List<String> sourcePlaylistIds) {
